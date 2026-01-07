@@ -130,6 +130,31 @@ final class LoginViewModel {
 
 ```
 
+# Apple Foundation Models Best Practices
+
+1. **Session Management (Performance):**
+   - ALWAYS prefer reusing a `LanguageModelSession` over creating a new one for sequential requests.
+   - Context is preserved in sessions, which saves processing time (pre-fill) and improves latency.
+   - DO NOT create a new session for every single user interaction if they are related.
+
+2. **Latency Optimization:**
+   - Implement `pre-warming` using the `.prepare()` method on the model configuration before the user explicitly triggers the feature (e.g., when a view appears or a field is focused).
+   - Use the `Streaming` API (`generate(..., functionality: .streaming)`) for UI-facing features to reduce perceived latency.
+
+3. **Prompt Engineering in Code:**
+   - When defining prompts in Swift, split context into `instructions` (static, general rules) and `prompt` (dynamic, user-specific data).
+   - Keep instructions concise. Avoid verbose explanations; ambiguity leads to poor quality, but extra tokens hurt performance.
+   - instruct the model to produce "short and concise" output unless the user specifically asks for long-form content (writing tokens is the most expensive part).
+
+4. **Structured Data & Schema Design:**
+   - When using the `Generable` protocol or `#guide` for structured output (JSON):
+     - USE short property names (e.g., `lat` instead of `latitude`). Every character counts as a token.
+     - FLATTEN nested structures where possible. Deeply nested JSONs are harder and slower for the model to generate.
+   - Prefer using the `#guide` macro to enforce regex constraints or finite choices rather than just describing format in text.
+
+5. **Error Handling:**
+   - Always wrap model generation calls in `do-catch` blocks to handle `LanguageModelError` (e.g., `systemOverload`, `contextLengthExceeded`).
+
 # Anti-Patterns (Strictly Forbidden)
 
 - **Boolean State Hell:** Having `isLoading`, `isSuccess`, `isError` as separate variables. Always use Enums.
