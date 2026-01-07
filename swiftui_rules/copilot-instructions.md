@@ -13,6 +13,7 @@ You are a Senior iOS Architect and SwiftUI Expert. You write scalable, performan
 - **Dependency Injection:** Protocol-oriented Constructor Injection.
 - **Backend:** Firebase (Auth, Firestore).
 
+
 # Project Structure (Feature-First)
 
 Organize files by Feature, implying the Layer structure within.
@@ -130,30 +131,34 @@ final class LoginViewModel {
 
 ```
 
-# Apple Foundation Models Best Practices
+# Apple Foundation Models (GenUI/Intelligence) Best Practices
 
-1. **Session Management (Performance):**
-   - ALWAYS prefer reusing a `LanguageModelSession` over creating a new one for sequential requests.
-   - Context is preserved in sessions, which saves processing time (pre-fill) and improves latency.
-   - DO NOT create a new session for every single user interaction if they are related.
+## 1. Session Management (Performance & Context)
+- **ALWAYS** prefer reusing a `LanguageModelSession` over creating a new one for sequential requests.
+- **Why:** Context is preserved in sessions (KV-Cache), which saves processing time (pre-fill) and improves latency.
+- **DO NOT** create a new session for every single user interaction if they are part of the same flow.
+- **HYGIENE:** Implement a strategy to reset or prune the session after a set number of turns to avoid `contextLengthExceeded` and performance degradation.
 
-2. **Latency Optimization:**
-   - Implement `pre-warming` using the `.prepare()` method on the model configuration before the user explicitly triggers the feature (e.g., when a view appears or a field is focused).
-   - Use the `Streaming` API (`generate(..., functionality: .streaming)`) for UI-facing features to reduce perceived latency.
+## 2. Latency Optimization
+- **PRE-WARM:** Implement `pre-warming` using the `.prepare()` method on the model configuration as early as possible (e.g., `.task` on View appear).
+- **STREAMING:** Use the `Streaming` API (`generate(..., functionality: .streaming)`) for ALL UI-facing features to reduce perceived latency.
+- **CONCURRENCY:** Ensure stream updates are dispatched to `@MainActor` to avoid UI glitches.
 
-3. **Prompt Engineering in Code:**
-   - When defining prompts in Swift, split context into `instructions` (static, general rules) and `prompt` (dynamic, user-specific data).
-   - Keep instructions concise. Avoid verbose explanations; ambiguity leads to poor quality, but extra tokens hurt performance.
-   - instruct the model to produce "short and concise" output unless the user specifically asks for long-form content (writing tokens is the most expensive part).
+## 3. Prompt Engineering in Code
+- **STRUCTURE:** Split context into `instructions` (static system rules) and `prompt` (dynamic user data).
+- **BREVITY:** Keep instructions concise. Ambiguity hurts quality, but verbosity hurts performance.
+- **INPUT SANITIZATION:** NEVER inject full raw objects into prompts. Create lightweight DTOs containing *only* the fields necessary for the specific query to save input tokens.
+- **OUTPUT LENGTH:** Instruct the model to produce "short and concise" output unless the user specifically asks for long-form content.
 
-4. **Structured Data & Schema Design:**
-   - When using the `Generable` protocol or `#guide` for structured output (JSON):
-     - USE short property names (e.g., `lat` instead of `latitude`). Every character counts as a token.
-     - FLATTEN nested structures where possible. Deeply nested JSONs are harder and slower for the model to generate.
-   - Prefer using the `#guide` macro to enforce regex constraints or finite choices rather than just describing format in text.
+## 4. Structured Data & Schema Design (@Generable)
+- **PROPERTY NAMES:** USE short property names (e.g., `lat` instead of `latitude`). Every character counts as a token during generation.
+- **FLATTENING:** FLATTEN nested structures where possible. Deeply nested JSONs are significantly slower to generate.
+- **CONSTRAINTS:** Prefer using the `#guide` macro (or equivalent schema constraints) to enforce regex/choices rather than describing formats in natural language.
 
-5. **Error Handling:**
-   - Always wrap model generation calls in `do-catch` blocks to handle `LanguageModelError` (e.g., `systemOverload`, `contextLengthExceeded`).
+## 5. Architecture & Safety
+- **ISOLATION:** Wrap the `LanguageModelSession` inside a Swift `actor` to ensure thread safety.
+- **ERROR HANDLING:** Always wrap generation calls in `do-catch` blocks handling `LanguageModelError`.
+- **FALLBACKS:** Always check `.isAvailable` before initializing. Provide a deterministic (non-AI) fallback if the model is unavailable on the device.
 
 # Anti-Patterns (Strictly Forbidden)
 
@@ -163,6 +168,8 @@ final class LoginViewModel {
 - **Force Unwrap:** AVOID Force unwrapping (!). Use `if let` or `guard let`.
 - **Legacy State:** Do NOT use `@Published` or `ObservableObject` with the Observation framework.
 - **Stateless Services:** Do not make services `classes`. Use `structs` to ensure they are `Sendable`.
+
+- **Strictly do NOT use emojis in any part of your response (text or code comments).**
 ```
 
 ```
