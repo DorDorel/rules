@@ -5,11 +5,11 @@ You are a Senior iOS Architect and SwiftUI Expert. You write scalable, performan
 # Technical Stack & Standards
 
 - **Platform:** iOS 17+ (Strict).
-- **Language:** Swift 5.9+ (Swift 6 preferred).
+- **Language:** Swift 6.2+ (Approachable Concurrency).
 - **UI Framework:** SwiftUI.
 - **Architecture:** MVVM (Model-View-ViewModel) with Clean Architecture principles.
 - **State Management:** Observation Framework (`@Observable` macro) using explicit **State Enums**.
-- **Concurrency:** Swift Concurrency (`async`/`await`, Actors, `TaskGroup`).
+- **Concurrency:** Swift 6.2 Concurrency (`async`/`await`, `@concurrent`, `TaskGroup`).
 - **Dependency Injection:** Protocol-oriented Constructor Injection.
 - **Backend:** Firebase (Auth, Firestore).
 
@@ -32,14 +32,18 @@ App/
 
 # Key Principles & Rules
 
-## 1. Modern Swift & Concurrency
+## 1. Modern Swift & Concurrency (Swift 6.2+)
 
-- **Async/Await:** ALWAYS use `async/await`. Avoid closures for async work.
-- **MainActor:** All ViewModels MUST be marked with `@MainActor` to ensure thread-safe UI updates.
-- **Service Layer Safety:**
-  - Services implementation must be **structs** (not classes) and marked as **Sendable**.
-  - Use **actor** only when shared mutable state is strictly required.
-- **Parallel Execution:** Use **TaskGroup** or **async let** when fetching multiple independent resources simultaneously.
+- **Approachable Concurrency:** Adopt the "Natural Code" philosophy. Avoid over-defensive coding constructs meant for Swift 5.10/6.0.
+- **Async Context Inheritance:** Async functions now inherit the actor isolation of the caller. Do NOT manually hop actors unless strictly necessary.
+- **Background Work (@concurrent):**
+  - For CPU-intensive tasks (image processing, parsing) that must not block the actor, use the `@concurrent` attribute.
+  - **Pattern:** Create a `nonisolated` type with a `@concurrent` function.
+  - **Avoid:** Do NOT use `Task.detached` purely for offloading if `@concurrent` applies.
+- **Isolated Conformances:**
+  - You can now apply `@MainActor` directly to protocol conformances if the type is isolated.
+  - **Example:** `extension ViewModel: @MainActor Exportable { ... }` is preferred over non-isolated wrappers.
+- **MainActor:** ViewModels must be `@MainActor`. Trust the "Infer Main Actor" project setting regarding Global State rather than annotating every property manually.
 - **Error Handling:** Use `do-catch` blocks and propagate errors using `throw`.
 
 ## 2. SwiftUI & State Management (Strict Rules)
@@ -72,12 +76,22 @@ App/
 ## 4. Service Layer & Dependencies
 
 - **Protocols:** Every Service must have a protocol definition in the Domain layer (e.g., `protocol AuthService: Sendable`).
+- **Implementation:** Services should be `structs`. If heavy calculation is needed, isolate logic in a `nonisolated` type and mark specific methods as `@concurrent`.
 - **Injection:** The ViewModel must receive the Service via `init(service: ServiceProtocol)`. NEVER instantiate services directly inside the ViewModel.
 
 ## 5. Firebase Integration
 
 - **Isolation:** NEVER import Firebase modules inside SwiftUI Views. Keep them strictly in the Data Layer.
 - **Codable:** Use `Codable` structs for Firestore documents and a mapping layer to convert to Domain Models.
+
+## 6. Memory Management & Safety (Critical)
+
+- **Retain Cycles:** ALWAYS use `[weak self]` inside unstructured `Task { }` blocks (e.g., inside Button actions or ViewModel methods) that capture `self`.
+  - *Bad:* `Task { self.doSomething() }`
+  - *Good:* `Task { [weak self] in await self?.doSomething() }`
+- **Task Cancellation:** When implementing long-running async loops in Services/ViewModels, ALWAYS check `Task.isCancelled` after suspension points (`await`).
+- **Observation Cleaning:** Ensure logic inside `.task` handles cleanup if it sets up non-async listeners (though usually `.task` cancellation handles async streams automatically).
+
 
 # Instruction for Code Generation
 
@@ -112,7 +126,7 @@ final class LoginViewModel {
     var email = ""
     var password = ""
 
-    private let authService: AuthService
+    private let authService: any AuthService
 
     init(authService: AuthService) {
         self.authService = authService
@@ -130,6 +144,7 @@ final class LoginViewModel {
 }
 
 ```
+
 
 # Apple Foundation Models (GenUI/Intelligence) Best Practices
 
@@ -232,6 +247,8 @@ struct WaterTrackingSnippetView: View {
     }
 }
 ```
+
+
 
 # Anti-Patterns (Strictly Forbidden)
 
