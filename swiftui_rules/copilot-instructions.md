@@ -66,12 +66,34 @@ App/
   - Use the **.task** view modifier for async work instead of manual `Task { }` inside `onAppear`.
   - Switch over the `state` enum in the `body` to determine the UI content.
 
-## 3. UI Best Practices & Performance
+## 3. UI Best Practices & Modern Design (iOS 26+)
 
-- **Granularity:** Never write massive `body` properties. Break down complex views into smaller `struct` SubViews.
-- **Lists:** Always use `List` or `LazyVStack` for dynamic collections.
-- **Navigation:** Use `NavigationStack` with `.navigationDestination(for:)`. Do NOT use `NavigationView`.
-- **Previews:** Use `#Preview` with **Mock Services** injected into the ViewModel.
+- **Granularity:** Never write massive `body` properties. Break down complex views into smaller `struct` SubViews for better maintainability and re-evaluation performance.
+- **Lists:** Always use `List` or `LazyVStack` for dynamic collections to ensure cell recycling and memory efficiency.
+- **Navigation:** Use `NavigationStack` with `.navigationDestination(for:)`. Use `.navigationTransition(.zoom)` for fluid transitions.
+
+- **Liquid Glass Implementation:**
+  - **Core Modifiers:** Use `.glassEffect()` for prominent elements. ALWAYS add `.interactive()` for touch-responsive views: `.glassEffect(.regular.interactive())`.
+  - **GlassEffectContainer:** Wrap multiple glass elements in a `GlassEffectContainer(spacing:)` at the highest possible level in the hierarchy to enable surface merging and performance optimization.
+  - **Morphing:** Use `@Namespace` with `.glassEffectID(_:in:)` to enable fluid "Liquid" morphing transitions between views.
+
+- **Advanced Toolbars:**
+  - **Customization:** Use `toolbar(id:)` with unique `ToolbarItem(id:)` to allow user rearranging.
+  - **Search:** Use `.searchToolbarBehavior(.minimize)` for space efficiency and `DefaultToolbarItem(kind: .search, placement: .bottomBar)` to reposition the search field.
+  - **Zoom Transitions:** Apply `.matchedTransitionSource(id:in:)` to toolbar items to create smooth zoom effects during navigation.
+
+- **Rich Text & Styled Editing:**
+  - **Selection:** Use `TextEditor(text: $text, selection: $selection)` with `AttributedTextSelection`.
+  - **Transformations:** Use `text.transformAttributes(in: &selection)` to apply styles dynamically to selected text.
+  - **Formatting:** Implement `AttributedTextFormattingDefinition` to enforce strict styling rules (e.g., brand-specific colors).
+
+- **Adaptive Widgets:**
+  - **Accented Mode:** Use `@Environment(\.widgetRenderingMode)` and `.widgetAccentable()` to support tinted Home Screens.
+  - **Backgrounds:** Always use `.containerBackground(for: .widget)` for native Liquid Glass integration.
+
+- **3D Data Visualization:**
+  - **Chart3D:** Use `Chart3D` with `SurfacePlot` for volumetric data. Bind `.chart3DPose($chartPose)` to enable interactive user rotation.
+  - **Projection:** Use `.chart3DCameraProjection(.perspective)` for immersive depth.
 
 ## 4. Service Layer & Dependencies
 
@@ -148,32 +170,31 @@ final class LoginViewModel {
 
 # Apple Foundation Models (GenUI/Intelligence) Best Practices
 
-## 1. Session Management (Performance & Context)
-- **ALWAYS** prefer reusing a `LanguageModelSession` over creating a new one for sequential requests.
-- **Why:** Context is preserved in sessions (KV-Cache), which saves processing time (pre-fill) and improves latency.
-- **DO NOT** create a new session for every single user interaction if they are part of the same flow.
-- **HYGIENE:** Implement a strategy to reset or prune the session after a set number of turns to avoid `contextLengthExceeded` and performance degradation.
+## Foundation Models Implementation (Apple Intelligence)
 
-## 2. Latency Optimization
-- **PRE-WARM:** Implement `pre-warming` using the `.prepare()` method on the model configuration as early as possible (e.g., `.task` on View appear).
-- **STREAMING:** Use the `Streaming` API (`generate(..., functionality: .streaming)`) for ALL UI-facing features to reduce perceived latency.
-- **CONCURRENCY:** Ensure stream updates are dispatched to `@MainActor` to avoid UI glitches.
+### 1. Availability & Session Lifecycle
+- **Strict Availability Check:** Always switch over `SystemLanguageModel.default.availability`. 
+  - Handle `.deviceNotEligible` (Hide features).
+  - Handle `.appleIntelligenceNotEnabled` (Prompt to Settings).
+  - Handle `.modelNotReady` (Show downloading state).
+- **Session Management:** - Reuse `LanguageModelSession` for multi-turn interactions to keep context (KV-Cache).
+  - Monitor the 4,096 token limit; handle `exceededContextWindowSize` by resetting the session.
 
-## 3. Prompt Engineering in Code
-- **STRUCTURE:** Split context into `instructions` (static system rules) and `prompt` (dynamic user data).
-- **BREVITY:** Keep instructions concise. Ambiguity hurts quality, but verbosity hurts performance.
-- **INPUT SANITIZATION:** NEVER inject full raw objects into prompts. Create lightweight DTOs containing *only* the fields necessary for the specific query to save input tokens.
-- **OUTPUT LENGTH:** Instruct the model to produce "short and concise" output unless the user specifically asks for long-form content.
+### 2. Structured Data (@Generable)
+- **Safe Data Access:** ALWAYS access generated data via `response.content`. NEVER use `response.output` when using structured generation.
+- **Model Steering:** Use the `@Guide` macro for property constraints:
+  - `@Guide(description: "...", .range(0...20))` for numeric limits.
+  - `@Guide(description: "...", .count(3))` for array length.
+- **Flattening:** Keep `@Generable` structs shallow to optimize generation speed.
 
-## 4. Structured Data & Schema Design (@Generable)
-- **PROPERTY NAMES:** USE short property names (e.g., `lat` instead of `latitude`). Every character counts as a token during generation.
-- **FLATTENING:** FLATTEN nested structures where possible. Deeply nested JSONs are significantly slower to generate.
-- **CONSTRAINTS:** Prefer using the `#guide` macro (or equivalent schema constraints) to enforce regex/choices rather than describing formats in natural language.
+### 3. Snapshot Streaming (UI Responsiveness)
+- **Pattern:** Use `session.streamResponse(to:generating:)` for all UI-facing tasks.
+- **PartiallyGenerated Types:** Bind the SwiftUI View to the `PartiallyGenerated` version of your struct (automatically synthesized by `@Generable`).
+- **MainActor updates:** Ensure each snapshot from the async sequence updates the UI on the `@MainActor`.
 
-## 5. Architecture & Safety
-- **ISOLATION:** Wrap the `LanguageModelSession` inside a Swift `actor` to ensure thread safety.
-- **ERROR HANDLING:** Always wrap generation calls in `do-catch` blocks handling `LanguageModelError`.
-- **FALLBACKS:** Always check `.isAvailable` before initializing. Provide a deterministic (non-AI) fallback if the model is unavailable on the device.
+### 4. Tool Calling & Errors
+- **Tool Definition:** Conform to the `Tool` protocol and use `Codable` for `Arguments`.
+- **Error Handling:** Explicitly catch `LanguageModelSession.ToolCallError` to debug if the failure is in the logic or the model's call.
 
 # App Intents & Interactive Snippets (iOS 18+ Standards)
 
