@@ -74,21 +74,25 @@ App/
 - **Navigation:** Use `NavigationStack` with `.navigationDestination(for:)`. Use `.navigationTransition(.zoom)` for fluid transitions.
 
 - **Liquid Glass Implementation:**
+
   - **Core Modifiers:** Use `.glassEffect()` for prominent elements. ALWAYS add `.interactive()` for touch-responsive views: `.glassEffect(.regular.interactive())`.
   - **GlassEffectContainer:** Wrap multiple glass elements in a `GlassEffectContainer(spacing:)` at the highest possible level in the hierarchy to enable surface merging and performance optimization.
   - **Morphing:** Use `@Namespace` with `.glassEffectID(_:in:)` to enable fluid "Liquid" morphing transitions between views.
 
 - **Advanced Toolbars:**
+
   - **Customization:** Use `toolbar(id:)` with unique `ToolbarItem(id:)` to allow user rearranging.
   - **Search:** Use `.searchToolbarBehavior(.minimize)` for space efficiency and `DefaultToolbarItem(kind: .search, placement: .bottomBar)` to reposition the search field.
   - **Zoom Transitions:** Apply `.matchedTransitionSource(id:in:)` to toolbar items to create smooth zoom effects during navigation.
 
 - **Rich Text & Styled Editing:**
+
   - **Selection:** Use `TextEditor(text: $text, selection: $selection)` with `AttributedTextSelection`.
   - **Transformations:** Use `text.transformAttributes(in: &selection)` to apply styles dynamically to selected text.
   - **Formatting:** Implement `AttributedTextFormattingDefinition` to enforce strict styling rules (e.g., brand-specific colors).
 
 - **Adaptive Widgets:**
+
   - **Accented Mode:** Use `@Environment(\.widgetRenderingMode)` and `.widgetAccentable()` to support tinted Home Screens.
   - **Backgrounds:** Always use `.containerBackground(for: .widget)` for native Liquid Glass integration.
 
@@ -110,26 +114,29 @@ App/
 ## 6. Memory Management & Safety (Critical)
 
 - **Retain Cycles:** ALWAYS use `[weak self]` inside unstructured `Task { }` blocks in classes (ViewModels).
-- **Strong Reference Pattern:** strict preference for `guard let self else { return }` at the start of the block to avoid optional chaining (`self?.`).
-  - *Bad:* `Task { [weak self] in await self?.loadData() }`
-  - *Good:* ```swift
+- **Strong Self Pattern:** Strict preference for the `guard let self else { return }` pattern at the start of the block to avoid repeated optional chaining (`self?.`).
+  - **Bad:** `Task { [weak self] in await self?.loadData() }`
+  - **Good:**
+    ```swift
     Task { [weak self] in
         guard let self else { return }
         await self.loadData()
     }
     ```
 - **Task Cancellation:** When implementing long-running async loops, ALWAYS check `Task.isCancelled` after suspension points (`await`).
-- **Observation Cleaning:** Ensure logic inside `.task` handles cleanup if it sets up non-async listeners.
+- **Observation Cleanup:** Ensure logic inside `.task` handles cleanup (e.g., cancelling listeners or subscriptions) if it sets up non-async observers.
 
 ## 7. Persistence with SwiftData (iOS 17+)
 
 - **Model Hierarchy & Inheritance:**
+
   - **IS-A Relationship:** Use class inheritance only for true "IS-A" relationships (e.g., `BusinessTrip` inherits from `Trip`).
   - **Base Class:** Apply the `@Model` macro to the base class. It must be a `class` and define all shared properties and relationships.
   - **Subclassing:** Apply `@Model` to subclasses. Use standard Swift inheritance and ensure `super.init` is called in the initializer.
   - **Hierarchy Depth:** Keep inheritance hierarchies shallow. If subclasses share only minimal properties, use an `enum` with associated values or protocols instead.
 
 - **Querying & Filtering:**
+
   - **Polymorphic Queries:** Use `@Query` on the base class type (e.g., `[Trip]`) to automatically fetch all instances, including all specialized subclasses.
   - **Predicate Filtering:** Filter for specific subclasses using the `is` operator within a `#Predicate`: `#Predicate<Trip> { $0 is BusinessTrip }`.
   - **Casting:** Use `as?` within predicates or views to access subclass-specific properties safely.
@@ -168,17 +175,20 @@ App/
 # App Intents & Interactive Snippets (iOS 18+ Standards)
 
 ## 1. Snippet Architecture & Types
+
 - **Strict Separation:** Distinguish clearly between **Confirmation Snippets** and **Result Snippets**.
 - **Standalone Design:** The Snippet UI MUST be fully understandable **without** the accompanying Siri Dialogue.
 - **View Isolation:** Create dedicated SwiftUI Views for snippets. Do NOT reuse full-screen app views.
 
 ## 2. Interactive UI Constraints (Strict)
+
 - **Height Cap:** The Snippet View **MUST NOT exceed 340pt** in height.
 - **Typography:** Use **larger-than-standard** font sizes.
 - **Layout Margins:** ALWAYS use `ContainerRelativeShape` or standard system padding.
 - **Contrast:** Ensure "Super High Contrast".
 
 ## 3. Interactivity & State
+
 - **Intent Buttons:** Use `Button(intent: MyIntent())` inside the snippet.
 - **Optimistic Updates:** The UI MUST reflect the state change **immediately**.
 - **Avoid Navigation:** Do NOT use `NavigationLink` inside snippets.
@@ -244,3 +254,4 @@ final class LoginViewModel {
         }
     }
 }
+```
