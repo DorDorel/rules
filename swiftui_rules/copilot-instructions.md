@@ -10,9 +10,10 @@ You are a Senior iOS Architect and SwiftUI Expert. You write scalable, performan
 - **Architecture:** MVVM (Model-View-ViewModel) with Clean Architecture principles.
 - **State Management:** Observation Framework (`@Observable` macro) using explicit **State Enums**.
 - **Concurrency:** Swift 6.2 Concurrency (`async`/`await`, `@concurrent`, `TaskGroup`).
+- **Persistence:** SwiftData (Schema V2+).
 - **Dependency Injection:** Protocol-oriented Constructor Injection.
 - **Backend:** Firebase (Auth, Firestore).
-
+- **Testing:** Swift Testing Framework (`import Testing`).
 
 # Project Structure (Feature-First)
 
@@ -132,6 +133,61 @@ App/
   - **Delete Rules:** Explicitly define `@Relationship(deleteRule:)` on the base class to ensure consistent lifecycle management across all subclasses.
   - **Memory Safety:** Avoid fetching all data and filtering with `compactMap` in-memory; always prefer `#Predicate` for type-based filtering at the database level.
 
+## 8. Foundation Models Implementation (Apple Intelligence)
+
+- **Availability & Session Lifecycle:**
+  - **Strict Availability Check:** Always switch over `SystemLanguageModel.default.availability`. Handle `.deviceNotEligible`, `.appleIntelligenceNotEnabled`, and `.modelNotReady` with specific UI fallbacks.
+  - **Session Management:** Reuse `LanguageModelSession` for multi-turn interactions to keep context (KV-Cache). Monitor the 4,096 token limit; handle `exceededContextWindowSize` by resetting the session.
+- **Structured Data (@Generable):**
+  - **Safe Data Access:** ALWAYS access generated data via `response.content`. NEVER use `response.output` when using structured generation.
+  - **Model Steering:** Use the `@Guide` macro for property constraints (`.range`, `.count`).
+  - **Flattening:** Keep `@Generable` structs shallow to optimize generation speed.
+- **Snapshot Streaming (UI Responsiveness):**
+  - **Pattern:** Use `session.streamResponse(to:generating:)` for all UI-facing tasks.
+  - **PartiallyGenerated Types:** Bind the SwiftUI View to the `PartiallyGenerated` version of your struct (automatically synthesized by `@Generable`).
+  - **MainActor updates:** Ensure each snapshot from the async sequence updates the UI on the `@MainActor`.
+- **Tool Calling & Errors:**
+  - **Error Handling:** Explicitly catch `LanguageModelSession.ToolCallError` to debug if the failure is in the logic or the model's call.
+
+## 9. Modern Testing Standards (Swift 6+)
+
+- **Framework:** Use **Swift Testing** (`import Testing`) instead of XCTest.
+- **Isolation & Mocking:**
+  - ALWAYS use the protocols defined in the **Domain Layer** to create Mocks.
+  - Mocks should be `structs` or `actors` (to ensure `Sendable` compliance).
+  - NEVER perform real network calls in tests.
+- **Testing ViewState:** Verify that `ViewState` transitions correctly (idle -> loading -> loaded).
+- **SwiftData Testing:** Use an **In-Memory** `ModelContainer` for SwiftData tests.
+
+# App Intents & Interactive Snippets (iOS 18+ Standards)
+
+## 1. Snippet Architecture & Types
+- **Strict Separation:** Distinguish clearly between **Confirmation Snippets** and **Result Snippets**.
+- **Standalone Design:** The Snippet UI MUST be fully understandable **without** the accompanying Siri Dialogue.
+- **View Isolation:** Create dedicated SwiftUI Views for snippets. Do NOT reuse full-screen app views.
+
+## 2. Interactive UI Constraints (Strict)
+- **Height Cap:** The Snippet View **MUST NOT exceed 340pt** in height.
+- **Typography:** Use **larger-than-standard** font sizes.
+- **Layout Margins:** ALWAYS use `ContainerRelativeShape` or standard system padding.
+- **Contrast:** Ensure "Super High Contrast".
+
+## 3. Interactivity & State
+- **Intent Buttons:** Use `Button(intent: MyIntent())` inside the snippet.
+- **Optimistic Updates:** The UI MUST reflect the state change **immediately**.
+- **Avoid Navigation:** Do NOT use `NavigationLink` inside snippets.
+
+# Anti-Patterns (Strictly Forbidden)
+
+- **Boolean State Hell:** Having `isLoading`, `isSuccess`, `isError` as separate variables. Always use Enums.
+- **Logic in View:** NEVER put business logic inside the body property.
+- **Class Services:** Do not make stateless services `classes`. Use `structs`.
+- **Force Unwrap:** AVOID Force unwrapping (!). Use `if let` or `guard let`.
+- **Legacy State:** Do NOT use `@Published` or `ObservableObject` with the Observation framework.
+- **Stateless Services:** Do not make services `classes`. Use `structs` to ensure they are `Sendable`.
+- **Raw AI Output:** Never parse `response.output` string when using structured generation; use `response.content`.
+
+- **Strictly do NOT use emojis in any part of your response (text or code comments).**
 
 # Instruction for Code Generation
 
@@ -182,122 +238,3 @@ final class LoginViewModel {
         }
     }
 }
-
-```
-
-
-# Apple Foundation Models (GenUI/Intelligence) Best Practices
-
-## Foundation Models Implementation (Apple Intelligence)
-
-### 1. Availability & Session Lifecycle
-- **Strict Availability Check:** Always switch over `SystemLanguageModel.default.availability`. 
-  - Handle `.deviceNotEligible` (Hide features).
-  - Handle `.appleIntelligenceNotEnabled` (Prompt to Settings).
-  - Handle `.modelNotReady` (Show downloading state).
-- **Session Management:** - Reuse `LanguageModelSession` for multi-turn interactions to keep context (KV-Cache).
-  - Monitor the 4,096 token limit; handle `exceededContextWindowSize` by resetting the session.
-
-### 2. Structured Data (@Generable)
-- **Safe Data Access:** ALWAYS access generated data via `response.content`. NEVER use `response.output` when using structured generation.
-- **Model Steering:** Use the `@Guide` macro for property constraints:
-  - `@Guide(description: "...", .range(0...20))` for numeric limits.
-  - `@Guide(description: "...", .count(3))` for array length.
-- **Flattening:** Keep `@Generable` structs shallow to optimize generation speed.
-
-### 3. Snapshot Streaming (UI Responsiveness)
-- **Pattern:** Use `session.streamResponse(to:generating:)` for all UI-facing tasks.
-- **PartiallyGenerated Types:** Bind the SwiftUI View to the `PartiallyGenerated` version of your struct (automatically synthesized by `@Generable`).
-- **MainActor updates:** Ensure each snapshot from the async sequence updates the UI on the `@MainActor`.
-
-### 4. Tool Calling & Errors
-- **Tool Definition:** Conform to the `Tool` protocol and use `Codable` for `Arguments`.
-- **Error Handling:** Explicitly catch `LanguageModelSession.ToolCallError` to debug if the failure is in the logic or the model's call.
-
-# App Intents & Interactive Snippets (iOS 18+ Standards)
-
-## 1. Snippet Architecture & Types
-- **Strict Separation:** Distinguish clearly between **Confirmation Snippets** and **Result Snippets**.
-  - **Confirmation:** Use when a transactional action is required (e.g., "Place Order"). The button verb MUST be explicit (e.g., `Order`, `Book`, not just `Done`).
-  - **Result:** Use for informational outcomes or status checks. The only system button allowed here is "Done".
-- **Standalone Design:** The Snippet UI MUST be fully understandable **without** the accompanying Siri Dialogue (Voice-off scenarios).
-- **View Isolation:** Create dedicated SwiftUI Views for snippets (e.g., `OrderConfirmationSnippetView`). Do NOT reuse full-screen app views which are too dense.
-
-## 2. Interactive UI Constraints (Strict)
-- **Height Cap:** The Snippet View **MUST NOT exceed 340pt** in height. Content exceeding this causes scrolling and high friction.
-- **Typography:** Use **larger-than-standard** font sizes. Snippets are "glanceable" overlays; standard `body` text is often too small.
-- **Layout Margins:** ALWAYS use `ContainerRelativeShape` or standard system padding to ensure the snippet adapts to different host contexts (Spotlight, Siri, Widget).
-- **Contrast:** Ensure "Super High Contrast". Snippets float over varying wallpapers/apps. Do NOT rely on subtle greys.
-
-## 3. Interactivity & State
-- **Intent Buttons:** Use `Button(intent: MyIntent())` inside the snippet for sub-actions (e.g., "Add +1", "Toggle Setting").
-- **Optimistic Updates:** The UI MUST reflect the state change **immediately** (visual feedback) while the Intent performs work in the background.
-- **Avoid Navigation:** Do NOT use `NavigationLink` inside snippets. If deep linking is needed, use `OpenURLIntent` or similar standard patterns to launch the main app.
-
-### Example of Interactive Snippet (Architecture Compliant):
-
-```swift
-import AppIntents
-import SwiftUI
-
-// 1. Intent Definition
-struct AddWaterIntent: AppIntent {
-    static var title: LocalizedStringResource = "Add Water"
-    
-    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
-        let currentLevel = try await WaterService.shared.addCup()
-        
-        // Return a Result Snippet with updated View
-        return .result(
-            dialog: "Added water.",
-            view: WaterTrackingSnippetView(level: currentLevel)
-        )
-    }
-}
-
-// 2. Specialized Snippet View (Presentation Layer)
-struct WaterTrackingSnippetView: View {
-    let level: Int
-    
-    var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading) {
-                Text("Hydration")
-                    .font(.caption) // Small label
-                    .foregroundStyle(.secondary)
-                Text("\(level)%")
-                    .font(.system(size: 44, weight: .heavy)) // Large, Glanceable
-                    .foregroundStyle(.blue)
-            }
-            
-            Spacer()
-            
-            // Interactive Button executing another Intent directly
-            Button(intent: AddWaterIntent()) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 40))
-                    .symbolEffect(.bounce, value: level) // Visual Feedback
-            }
-            .buttonStyle(.plain)
-        }
-        .padding()
-        .background(ContainerRelativeShape().fill(.thinMaterial)) // Adaptive Shape
-        .frame(maxHeight: 120) // Well below the 340pt limit
-    }
-}
-```
-
-
-
-# Anti-Patterns (Strictly Forbidden)
-
-- **Boolean State Hell:** Having `isLoading`, `isSuccess`, `isError` as separate variables. Always use Enums.
-- **Logic in View:** NEVER put business logic inside the body property.
-- **Class Services:** Do not make stateless services `classes`. Use `structs`.
-- **Force Unwrap:** AVOID Force unwrapping (!). Use `if let` or `guard let`.
-- **Legacy State:** Do NOT use `@Published` or `ObservableObject` with the Observation framework.
-- **Stateless Services:** Do not make services `classes`. Use `structs` to ensure they are `Sendable`.
-
-- **Strictly do NOT use emojis in any part of your response (text or code comments).**
-
-```
