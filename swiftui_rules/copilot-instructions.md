@@ -66,7 +66,7 @@ App/
   - Use the **.task** view modifier for async work instead of manual `Task { }` inside `onAppear`.
   - Switch over the `state` enum in the `body` to determine the UI content.
 
-## 3. UI Best Practices & Modern Design (iOS 26+)
+## 3. UI Best Practices & Modern Design (iOS 18+)
 
 - **Granularity:** Never write massive `body` properties. Break down complex views into smaller `struct` SubViews for better maintainability and re-evaluation performance.
 - **Lists:** Always use `List` or `LazyVStack` for dynamic collections to ensure cell recycling and memory efficiency.
@@ -113,6 +113,24 @@ App/
   - *Good:* `Task { [weak self] in await self?.doSomething() }`
 - **Task Cancellation:** When implementing long-running async loops in Services/ViewModels, ALWAYS check `Task.isCancelled` after suspension points (`await`).
 - **Observation Cleaning:** Ensure logic inside `.task` handles cleanup if it sets up non-async listeners (though usually `.task` cancellation handles async streams automatically).
+
+## 7. Persistence with SwiftData (iOS 17+)
+
+- **Model Hierarchy & Inheritance:**
+  - **IS-A Relationship:** Use class inheritance only for true "IS-A" relationships (e.g., `BusinessTrip` inherits from `Trip`).
+  - **Base Class:** Apply the `@Model` macro to the base class. It must be a `class` and define all shared properties and relationships.
+  - **Subclassing:** Apply `@Model` to subclasses. Use standard Swift inheritance and ensure `super.init` is called in the initializer.
+  - **Hierarchy Depth:** Keep inheritance hierarchies shallow. If subclasses share only minimal properties, use an `enum` with associated values or protocols instead.
+
+- **Querying & Filtering:**
+  - **Polymorphic Queries:** Use `@Query` on the base class type (e.g., `[Trip]`) to automatically fetch all instances, including all specialized subclasses.
+  - **Predicate Filtering:** Filter for specific subclasses using the `is` operator within a `#Predicate`: `#Predicate<Trip> { $0 is BusinessTrip }`.
+  - **Casting:** Use `as?` within predicates or views to access subclass-specific properties safely.
+
+- **Relationships & Performance:**
+  - **Polymorphic Relationships:** Define relationships using the base class type (e.g., `var trips: [Trip]`) to allow a single collection to store multiple subclass types.
+  - **Delete Rules:** Explicitly define `@Relationship(deleteRule:)` on the base class to ensure consistent lifecycle management across all subclasses.
+  - **Memory Safety:** Avoid fetching all data and filtering with `compactMap` in-memory; always prefer `#Predicate` for type-based filtering at the database level.
 
 
 # Instruction for Code Generation
