@@ -109,11 +109,17 @@ App/
 
 ## 6. Memory Management & Safety (Critical)
 
-- **Retain Cycles:** ALWAYS use `[weak self]` inside unstructured `Task { }` blocks (e.g., inside Button actions or ViewModel methods) that capture `self`.
-  - *Bad:* `Task { self.doSomething() }`
-  - *Good:* `Task { [weak self] in await self?.doSomething() }`
-- **Task Cancellation:** When implementing long-running async loops in Services/ViewModels, ALWAYS check `Task.isCancelled` after suspension points (`await`).
-- **Observation Cleaning:** Ensure logic inside `.task` handles cleanup if it sets up non-async listeners (though usually `.task` cancellation handles async streams automatically).
+- **Retain Cycles:** ALWAYS use `[weak self]` inside unstructured `Task { }` blocks in classes (ViewModels).
+- **Strong Reference Pattern:** strict preference for `guard let self else { return }` at the start of the block to avoid optional chaining (`self?.`).
+  - *Bad:* `Task { [weak self] in await self?.loadData() }`
+  - *Good:* ```swift
+    Task { [weak self] in
+        guard let self else { return }
+        await self.loadData()
+    }
+    ```
+- **Task Cancellation:** When implementing long-running async loops, ALWAYS check `Task.isCancelled` after suspension points (`await`).
+- **Observation Cleaning:** Ensure logic inside `.task` handles cleanup if it sets up non-async listeners.
 
 ## 7. Persistence with SwiftData (iOS 17+)
 
