@@ -98,6 +98,74 @@ lib/src/
   - *Example:* `await loginRobot.enterEmail('test@test.com');`
 - **Unit Tests:** Test Controllers by mocking Repositories using `mocktail`. Verify `state` transitions from `AsyncLoading` -> `AsyncData`.
 
+## 8. Scalable Networking & HTTP Infrastructure
+
+- **Centralized HTTP Client:**
+  - **Prohibition:** NEVER instantiate `Dio` or `http.Client` directly inside a Repository.
+  - **Single Source of Truth:** Create a dedicated `ApiClient` class provided via Riverpod (`apiClientProvider`). This client must handle base URLs, timeouts, and header injection (Auth tokens) centrally.
+
+- **Generic Request Wrapper:**
+  - **The Pattern:** The `ApiClient` must expose a generic method `request<T>` (or specific verbs `get<T>`, `post<T>`).
+  - **Parsing Strategy:** Since Dart lacks runtime reflection for generic types, you MUST pass a `T Function(Map<String, dynamic>) fromJson` parser to the generic method.
+  - **Isolate Offloading:** The generic method must automatically offload the JSON decoding to a background thread using `Isolate.run` before returning the result.
+
+- **Error Normalization:**
+  - Catch `DioException` or `SocketException` globally within the `ApiClient`.
+  - Convert these low-level errors into typed Domain Exceptions (e.g., `NetworkException.unauthorized`, `NetworkException.serverError`) before they reach the Repository.
+
+### Example of Compliant Network Infrastructure:
+
+```dart
+// infrastructure/networking/api_client.dart
+class ApiClient {
+  final Dio _dio;
+  ApiClient(this._dio);
+
+  Future<T> get<T>({
+    required String path,
+    required T Function(Map<String, dynamic>) fromJson,
+    Map<String, dynamic>? queryParams,
+  }) async {
+    try {
+      final response = await _dio.get(path, queryParameters: queryParams);
+      final data = response.data;
+
+      // Validate HTTP Status (200-299)
+      if ((response.statusCode ?? 0) < 200 || (response.statusCode ?? 0) >= 300) {
+        throw ServerException(code: response.statusCode);
+      }
+
+      // Offload heavy parsing to Isolate
+      return await Isolate.run(() {
+        if (data is Map<String, dynamic>) return fromJson(data);
+        throw ParseException('Expected JSON Map');
+      });
+
+    } on DioException catch (e) {
+      throw NetworkException.fromDio(e);
+    }
+  }
+}
+
+// usage in Data Layer
+final userRepositoryProvider = Provider((ref) => UserRepository(ref.read(apiClientProvider)));
+
+class UserRepository implements IUserRepository {
+  final ApiClient _client;
+  UserRepository(this._client);
+
+  @override
+  Future<UserEntity> fetchUser(String id) async {
+    // Clean, Type-Safe, Offloaded call
+    final dto = await _client.get(
+      path: '/users/$id',
+      fromJson: UserDTO.fromJson,
+    );
+    return dto.toDomain();
+  }
+}
+```
+
 # Anti-Patterns (Strictly Forbidden)
 
 - **Logic in UI:** `onTap: () async { await firestore.collection... }` is strictly prohibited. Call a Controller method.
