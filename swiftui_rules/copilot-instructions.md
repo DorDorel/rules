@@ -231,6 +231,357 @@ actor NetworkManager {
 }
 ```
 
+## 11. Performance & Optimization
+
+### Profiling Strategy
+
+- **Instruments Integration:** Profile regularly during development, not just before release.
+  - **Time Profiler:** Use for CPU-intensive operations. Target 60fps (16.67ms per frame) or 120fps (8.33ms) on ProMotion devices.
+  - **Allocations:** Monitor memory growth patterns. Watch for retain cycles and unexpected allocations in tight loops.
+  - **Leaks:** Run before every major release. Zero tolerance for memory leaks.
+
+- **Performance Budgets:**
+  - **View Initialization:** < 100ms for complex views.
+  - **API Response Handling:** < 50ms from data arrival to UI update.
+  - **SwiftData Queries:** < 200ms for complex predicates with < 10,000 records.
+
+- **Optimization Triggers:**
+  - **Rendering:** If `body` evaluation takes > 5ms, decompose into smaller views.
+  - **List Performance:** If scrolling drops below 60fps, implement view identity with `.id()` or lazy loading.
+  - **Image Loading:** Always decode images off the main thread using `@concurrent` or dedicated actor.
+
+### SwiftUI Performance Patterns
+
+```swift
+// Bad - Recreates DateFormatter on every render
+var body: some View {
+    Text(date, formatter: DateFormatter())
+}
+
+// Good - Reuse formatter
+private let dateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    return formatter
+}()
+
+var body: some View {
+    Text(date, formatter: dateFormatter)
+}
+```
+
+- **Expensive Computations:** Move to computed properties with explicit caching or use `@State` with `.task`.
+- **Avoid Overdraw:** Use `.drawingGroup()` for complex animations to flatten the view hierarchy into a single layer.
+
+---
+
+## 12. Accessibility (A11y) Standards
+
+### Mandatory Requirements
+
+- **VoiceOver Support:**
+  - Every interactive element MUST have a meaningful `.accessibilityLabel()`.
+  - Use `.accessibilityHint()` for non-obvious actions.
+  - Group related elements with `.accessibilityElement(children: .combine)`.
+
+- **Dynamic Type:**
+  - NEVER use fixed font sizes. Always use `.font(.body)`, `.font(.headline)`, etc.
+  - Test all screens at Accessibility Size Category "AX5" (largest).
+  - Use `.minimumScaleFactor()` or `.lineLimit()` with `.truncationMode()` only when necessary.
+
+- **Color & Contrast:**
+  - Maintain WCAG AA contrast ratio (4.5:1 for normal text, 3:1 for large text).
+  - Use `@Environment(\.colorScheme)` to adapt to Dark Mode.
+  - Never rely solely on color to convey information. Use icons, labels, or patterns.
+
+- **Reduce Motion:**
+  - Check `@Environment(\.accessibilityReduceMotion)` before complex animations.
+  - Provide instant transitions as fallback.
+
+### Implementation Example
+
+```swift
+@Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+var body: some View {
+    Button("Delete") { deleteItem() }
+        .accessibilityLabel("Delete item")
+        .accessibilityHint("Removes this item from your list")
+        .animation(reduceMotion ? .none : .spring, value: isExpanded)
+}
+```
+
+---
+
+## 13. Error Recovery & Resilience
+
+### Network Failure Handling
+
+- **Retry Strategy:**
+  - Implement exponential backoff for transient failures (500-503 errors).
+  - Max 3 retry attempts with delays: 1s, 2s, 4s.
+  - Do NOT retry on 4xx errors (except 429 Rate Limit).
+
+```swift
+actor NetworkManager {
+    func fetchWithRetry<T: Decodable>(
+        url: URL,
+        maxRetries: Int = 3
+    ) async throws(NetworkError) -> T {
+        var lastError: NetworkError?
+        
+        for attempt in 0..<maxRetries {
+            do {
+                return try await fetch(url: url)
+            } catch let error as NetworkError {
+                lastError = error
+                
+                // Don't retry client errors
+                if case .serverError(let code) = error, code < 500 {
+                    throw error
+                }
+                
+                if attempt < maxRetries - 1 {
+                    let delay = pow(2.0, Double(attempt))
+                    try await Task.sleep(for: .seconds(delay))
+                }
+            }
+        }
+        
+        throw lastError ?? .unknown
+    }
+}
+```
+
+### Offline Mode
+
+- **Local-First Architecture:**
+  - Write to SwiftData immediately, sync to backend asynchronously.
+  - Show optimistic UI updates with pending state indicator.
+  - Queue failed operations and retry when connectivity returns.
+
+- **Connectivity Monitoring:**
+  - Use `Network` framework to observe path updates.
+  - Update UI state to reflect offline mode clearly.
+
+```swift
+import Network
+
+actor ConnectivityMonitor {
+    enum Status: Sendable {
+        case connected
+        case disconnected
+        case unknown
+    }
+    
+    private var monitor: NWPathMonitor?
+    
+    func startMonitoring() -> AsyncStream<Status> {
+        AsyncStream { continuation in
+            let monitor = NWPathMonitor()
+            self.monitor = monitor
+            
+            monitor.pathUpdateHandler = { path in
+                let status: Status = path.status == .satisfied ? .connected : .disconnected
+                continuation.yield(status)
+            }
+            
+            monitor.start(queue: DispatchQueue(label: "connectivity"))
+            
+            continuation.onTermination = { [monitor] _ in
+                monitor.cancel()
+            }
+        }
+    }
+}
+
+// Usage in ViewModel:
+@MainActor
+@Observable
+final class AppViewModel {
+    private(set) var connectivityStatus: ConnectivityMonitor.Status = .unknown
+    private let connectivityMonitor = ConnectivityMonitor()
+    
+    func observeConnectivity() {
+        Task {
+            for await status in await connectivityMonitor.startMonitoring() {
+                self.connectivityStatus = status
+            }
+        }
+    }
+}
+```
+
+### Graceful Degradation
+
+- **Feature Toggles:** Disable non-critical features when backend services are unavailable.
+- **Cached Content:** Display stale data with timestamp indicator rather than empty states.
+- **User Communication:** Show actionable error messages, not technical jargon.
+
+---
+
+## 14. Analytics & Observability
+
+### Structured Logging
+
+- **Log Levels:** Use `OSLog` with appropriate levels:
+  - `.debug`: Development-only verbose information.
+  - `.info`: General operational events.
+  - `.error`: Recoverable errors requiring attention.
+  - `.fault`: Critical failures requiring immediate action.
+
+```swift
+import OSLog
+
+extension Logger {
+    static let networking = Logger(subsystem: "com.app.bundle", category: "networking")
+    static let persistence = Logger(subsystem: "com.app.bundle", category: "persistence")
+}
+
+// Usage
+Logger.networking.info("API request started: \(endpoint)")
+Logger.networking.error("Request failed: \(error.localizedDescription)")
+```
+
+### Analytics Events
+
+- **Event Taxonomy:**
+  - **Screen Views:** Track navigation patterns.
+  - **User Actions:** Button taps, form submissions, feature usage.
+  - **Errors:** Caught exceptions, failed operations.
+  - **Performance:** Slow operations, timeouts.
+
+- **Privacy First:**
+  - NEVER log PII (email, phone, location) without explicit consent.
+  - Hash or anonymize user identifiers.
+  - Provide opt-out mechanism.
+
+### Crash Reporting
+
+- **Context Enrichment:**
+  - Attach user state (logged in, subscription tier) as metadata.
+  - Include relevant ViewState at crash time.
+  - Tag with app version and build number.
+
+- **Crash-Free Rate Target:** Maintain > 99.5% crash-free sessions.
+
+---
+
+## 15. Code Complexity & Refactoring Thresholds
+
+### Cyclomatic Complexity
+
+- **Function Level:** Max complexity of 10. If exceeded, decompose into helper functions.
+- **Type Level:** Max 300 lines per file. Split into extensions or separate types.
+
+### ViewState Complexity
+
+- **Enum Cases:** If `ViewState` exceeds 5 cases, evaluate if the view is doing too much.
+- **Associated Values:** Keep payloads simple. Nested enums or large structs indicate need for sub-ViewModels.
+
+### Refactoring Triggers
+
+| Metric | Threshold | Action |
+|--------|-----------|--------|
+| Function length | > 50 lines | Extract helper methods |
+| Type properties | > 10 stored properties | Split into smaller types or use composition |
+| Protocol methods | > 8 methods | Consider splitting protocol by responsibility |
+| Test file size | > 500 lines | Split by feature area or test type |
+
+### Code Review Checklist
+
+Before marking PR as ready:
+1. All `ViewState` transitions tested.
+2. No force unwraps outside of test code.
+3. All async functions handle cancellation.
+4. Memory graph debugger run for new screens.
+5. VoiceOver tested on at least one screen.
+
+---
+
+## 16. Trade-off Guidelines
+
+### Performance vs. Readability
+
+**Prefer Readability by Default:**
+- Optimize only when profiling identifies a bottleneck.
+- Document performance-critical sections with comments explaining the trade-off.
+
+**Example:**
+```swift
+// Performance-critical: This view renders 1000+ items in a grid
+// Using LazyVGrid with fixed item size to minimize layout passes
+LazyVGrid(columns: columns, spacing: 2) {
+    ForEach(items) { item in
+        ItemCell(item: item)
+            .frame(width: 80, height: 80) // Fixed size prevents expensive layout
+    }
+}
+```
+
+### Abstraction vs. Simplicity
+
+- **Rule of Three:** Don't abstract until the same pattern appears three times.
+- **Protocol Overhead:** Only introduce protocols when multiple implementations exist or for testing boundaries.
+
+### Type Safety vs. Flexibility
+
+- **Strongly Typed Preferred:** Use `enum` with associated values over `Any` or dictionaries.
+- **Exception:** JSON or dynamic backend responses can use type-erased wrappers with clear boundaries.
+
+---
+
+## 17. Documentation Standards
+
+### Code Comments
+
+- **When to Comment:**
+  - Complex algorithms requiring explanation.
+  - Non-obvious performance optimizations.
+  - Workarounds for platform bugs (include radar number).
+
+- **When NOT to Comment:**
+  - Self-documenting code with clear naming.
+  - Repeating what the code obviously does.
+
+### Type Documentation
+
+```swift
+/// Manages user authentication state and coordinates with Firebase Auth.
+///
+/// This service handles the full authentication lifecycle including:
+/// - Email/password sign-in
+/// - Social authentication (Apple, Google)
+/// - Token refresh and session management
+/// - Biometric authentication when available
+///
+/// - Note: All methods are async and must be called from MainActor context.
+/// - Warning: Sign-out will clear all local user data from SwiftData.
+@MainActor
+@Observable
+final class AuthenticationService: AuthService {
+    // Implementation
+}
+```
+
+### README Requirements
+
+Every feature module should include:
+- **Purpose:** What problem does this solve?
+- **Architecture:** High-level component diagram.
+- **Dependencies:** External and internal dependencies.
+- **Testing:** How to run tests, coverage expectations.
+
+---
+
+## Summary
+
+These additions ensure:
+- **Production Readiness:** Performance, accessibility, and resilience are first-class concerns.
+- **Maintainability:** Clear thresholds for when to refactor prevent technical debt accumulation.
+- **Developer Experience:** Structured logging and analytics provide visibility into production behavior.
+- **Balanced Trade-offs:** Explicit guidelines for choosing between competing priorities.
+
 
 # App Intents & Interactive Snippets (iOS 18+ Standards)
 
