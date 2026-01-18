@@ -172,6 +172,61 @@ App/
 - **Testing ViewState:** Verify that `ViewState` transitions correctly (idle -> loading -> loaded).
 - **SwiftData Testing:** Use an **In-Memory** `ModelContainer` for SwiftData tests.
 
+## 10. Scalable Networking & Infrastructure
+
+- **Centralized Network Client:**
+  - **Prohibition:** NEVER call `URLSession.shared.data(from:)` directly inside a Feature Service or ViewModel.
+  - **Single Source of Truth:** Implement a singleton or injected `NetworkClient` that wraps `URLSession`. This ensures consistent header injection (Auth tokens), logging, and error handling across the entire app.
+
+- **Generic Decoding Implementation:**
+  - **The Pattern:** The Network Client must expose a generic method `fetch<T: Decodable>` that accepts a Request/URL and the expected `Type`.
+  - **Responsibility:** This method acts as the sole place where `JSONDecoder` is initialized and where HTTP Status Codes (200-299) are validated.
+  - **Error Normalization:** Map low-level `URLError` and HTTP codes into a typed `NetworkError` enum (e.g., `.unauthorized`, `.serverError(Int)`, `.decodingFailed`).
+
+- **Endpoint Management:**
+  - Avoid raw strings for URLs. Use an `Endpoint` protocol or enum to construct paths and query parameters safely.
+
+### Example of Compliant Network Layer:
+
+```swift
+// Infrastructure Layer
+enum NetworkError: Error {
+    case invalidURL
+    case serverError(Int)
+    case decodingError(Error)
+    case unknown(Error)
+}
+
+actor NetworkManager {
+    static let shared = NetworkManager()
+    private init() {}
+
+    func fetch<T: Decodable>(url: URL) async throws -> T {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw NetworkError.serverError(-1)
+            }
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw NetworkError.serverError(httpResponse.statusCode)
+            }
+            
+            let decoder = JSONDecoder()
+            // decoder.keyDecodingStrategy = .convertFromSnakeCase // Optional global config
+            return try decoder.decode(T.self, from: data)
+            
+        } catch let decodingError as DecodingError {
+            throw NetworkError.decodingError(decodingError)
+        } catch let error as NetworkError {
+            throw error
+        } catch {
+            throw NetworkError.unknown(error)
+        }
+    }
+}
+
 # App Intents & Interactive Snippets (iOS 18+ Standards)
 
 ## 1. Snippet Architecture & Types
