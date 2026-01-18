@@ -226,6 +226,8 @@ actor NetworkManager {
         }
     }
 }
+```
+
 
 # App Intents & Interactive Snippets (iOS 18+ Standards)
 
