@@ -45,8 +45,8 @@ App/
   - You can now apply `@MainActor` directly to protocol conformances if the type is isolated.
   - **Example:** `extension ViewModel: @MainActor Exportable { ... }` is preferred over non-isolated wrappers.
 - **MainActor:** ViewModels must be `@MainActor`. Trust the "Infer Main Actor" project setting regarding Global State rather than annotating every property manually.
-- **Error Handling:** Use `do-catch` blocks and propagate errors using `throw`.
-
+- **Error Handling (Typed Throws):** - **Strictly enforce Typed Throws** (`throws(SpecificError)`) in Domain and Data layers to define precise failure contracts. 
+  - **Avoid** generic `throws` (`any Error`) unless interacting with legacy Objective-C APIs or system frameworks that do not yet support typed throws.
 ## 2. SwiftUI & State Management (Strict Rules)
 
 - **@Observable Macro:** Use for all ViewModels. Do NOT use `ObservableObject` or `@Published`.
@@ -102,7 +102,10 @@ App/
 
 ## 4. Service Layer & Dependencies
 
-- **Protocols:** Every Service must have a protocol definition in the Domain layer (e.g., `protocol AuthService: Sendable`).
+- **Protocols:** Every Service must have a protocol definition in the Domain layer.
+  - **Typed Contracts:** Protocol methods MUST specify the exact error type.
+  - **Bad:** `func getData() async throws -> Data`
+  - **Good:** `func getData() async throws(DomainError) -> Data`
 - **Implementation:** Services should be `structs`. If heavy calculation is needed, isolate logic in a `nonisolated` type and mark specific methods as `@concurrent`.
 - **Injection:** The ViewModel must receive the Service via `init(service: ServiceProtocol)`. NEVER instantiate services directly inside the ViewModel.
 
