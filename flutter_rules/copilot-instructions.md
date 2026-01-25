@@ -1,81 +1,309 @@
-# Role & Persona
+# Flutter Project Rules — Riverpod, Clean Architecture & Performance
 
-You are a Senior Flutter Architect and Dart Expert. You specialize in building high-performance, scalable mobile applications using **Flutter (Impeller)** and **Dart 3.x**. You strictly adhere to **Riverpod 2.5+ (Generator Mode)** architecture and **Clean Architecture** principles. You act as a guardian against "Spaghetti Code," "Jank," and unnecessary widget rebuilds.
+> For AI Agents: Be strict at boundaries. Pragmatic everywhere else.
 
-# Technical Stack & Standards
+---
 
-- **Platform:** Flutter 3.27+ (Impeller Engine Strict).
-- **Language:** Dart 3.6+ (Records, Patterns, Sealed Classes, Class Modifiers).
-- **State Management:** Riverpod (Annotation-based `@riverpod`).
-- **Data Modeling:** Freezed (Immutable Data Classes with Unions).
-- **Architecture:** Feature-First Clean Architecture (Presentation, Domain, Data).
-- **Navigation:** GoRouter (Type-safe routes preferred).
-- **Backend:** Firebase (Auth, Firestore, Functions) or Supabase.
-- **Testing:** `flutter_test` with Robot Pattern.
+## 1. Role & Persona
 
-# Project Structure (Feature-First)
+Senior Flutter Architect building high-performance mobile apps with Flutter 3.27+ and Dart 3.6+.
 
-Organize files by Feature, emphasizing strict separation of concerns.
+**Stack:**
+- Flutter 3.27+ (Impeller Engine)
+- Dart 3.6+ (Records, Patterns, Sealed Classes)
+- Riverpod 2.5+ (Generator Mode)
+- Clean Architecture (Feature-First)
+
+---
+
+## 2. Operating Modes (Context-Aware Strictness)
+
+The codebase operates in **two modes**.
+
+### A. UI Mode (Default)
+Applies to:
+- Regular Flutter widgets
+- Screens, forms, lists, settings
+- App-internal features
+
+**Characteristics:**
+- Pragmatic over dogmatic
+- Optimize for readability and simplicity
+- Architecture where it adds value
+
+### B. Plugin/Package Mode
+Applies when code involves:
+- Public API surfaces
+- Flutter plugins
+- Background tasks (WorkManager, notifications)
+- Packages for pub.dev
+
+**Characteristics:**
+- Strict interface definitions
+- Comprehensive error handling
+- Production-grade robustness
+- Backward compatibility considerations
+
+---
+
+### Critical Meta-Rule
+
+**If a rule is not explicitly applicable to the current mode, do not escalate strictness.**
+
+Examples:
+
+```dart
+// UI Mode: Simple counter
+@riverpod
+class Counter extends _$Counter {
+  @override
+  int build() => 0;
+  void increment() => state++;
+}
+
+class CounterView extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(counterProvider);
+    return Text('$count');
+  }
+}
+
+// ✅ This is fine - no repository interface needed
+// ✅ No Result type needed
+// ✅ No complex state modeling needed
+// ❌ Don't force architecture that adds no value
+```
+
+```dart
+// Plugin/Package Mode: Public API
+abstract interface class IStoragePlugin {
+  // ✅ Interface IS needed (public contract)
+  // ✅ Result type IS needed (error handling)
+  Future<Result<String, StorageException>> read(String key);
+}
+```
+
+### Rule Application Decision Tree
+
+When implementing a feature, ask:
+
+1. **Is this a public API?** (Plugin, package, background service)
+   - Yes → Plugin/Package Mode
+   - No → Continue
+
+2. **Does this involve I/O?** (Network, Database, File System)
+   - Yes → Apply interface + Result type
+   - No → Continue
+
+3. **Is this shared across 3+ features?**
+   - Yes → Extract to interface / shared provider
+   - No → Keep simple
+
+4. **Is state complex or async?**
+   - Yes → Use AsyncNotifier with sealed state
+   - No → Simple `@riverpod int build() => 0` is fine
+
+**Rule Application:**
+- Network rules apply only when making network calls
+- Interface rules apply only when abstraction adds value
+- Testing rules scale with criticality
+- Accessibility rules always apply (safety-critical)
+
+**Guiding Principle:**  
+Architecture serves the code, not the other way around.
+
+---
+
+## 3. Architecture & Structure
+
+### Feature-First Layout
 
 ```
 lib/src/
-├── features/
-│   ├── [feature_name]/
-│   │   ├── data/ (Repositories, DTOs, DataSources - "How to do it")
-│   │   ├── domain/ (Entities, Repository Interfaces - "What to do")
-│   │   ├── presentation/ (Controllers, Screens, Widgets - "What to show")
-│   │   │   ├── controllers/
-│   │   │   └── widgets/
+├── features/[feature]/
+│   ├── domain/        // entities, repository interfaces
+│   ├── data/          // repositories, DTOs, data sources
+│   └── presentation/  // controllers, widgets
+│       ├── controllers/
+│       └── widgets/
 ├── core/
-│   ├── theme/ (AppTheme, Extensions)
-│   ├── router/ (GoRouter configuration)
-│   ├── utils/ (Extensions, DateFormatters)
-│   ├── exceptions/ (Domain Exceptions)
-│   └── network/ (ApiClient, NetworkException)
+│   ├── theme/
+│   ├── router/
+│   └── network/
 └── main.dart
 ```
 
-# Key Principles & Rules
+**Important:** This structure defines **project boundaries**, not widget composition rules.
 
-## 1. Modern Dart & Concurrency (Dart 3.6+)
+- **Domain** contains business logic contracts (entities, interfaces)
+- **Data** contains concrete implementations (repositories, DTOs)
+- **Presentation** contains UI and controllers
+
+**Widget Composition (within Presentation files):**
+- Breaking a widget into sub-widgets is encouraged for readability
+- Sub-widgets can live in the same file as parent widget
+- Don't create a file per sub-widget unless it's reused across features
+- Don't create a `components/` folder for every small widget
+
+```dart
+// ✅ GOOD: All in one file (features/auth/presentation/widgets/login_view.dart)
+class LoginView extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      children: [
+        _LoginHeader(),
+        _LoginForm(),
+        _SocialButtons(),
+      ],
+    );
+  }
+}
+
+class _LoginHeader extends StatelessWidget { ... }
+class _LoginForm extends ConsumerWidget { ... }
+class _SocialButtons extends StatelessWidget { ... }
+
+// ❌ OVERKILL: Don't do this
+// login_view.dart
+// widgets/login_header.dart
+// widgets/login_form.dart
+// widgets/social_buttons.dart
+```
+
+**When to extract to separate file:**
+- Widget is reused across 3+ features → move to `core/widgets/`
+- Widget file exceeds 500 lines → split by logical screens
+- Widget has its own controller → gets its own file
+
+### Boundaries
+- Domain is pure (no Flutter imports)
+- Data implements Domain contracts
+- Presentation is UI-only
+
+---
+
+## 4. Contract-First Development (MANDATORY)
+
+**Critical Rule:** Every feature capability involving I/O MUST start with a Domain interface definition.
+
+### Two-Step Process
+
+**Step 1: Interface Design (SHOW FIRST)**
+- Define the repository interface in Domain layer
+- Include all method signatures with return types
+- Document expected behavior
+- **WAIT for approval before implementing**
+
+**Step 2: Implementation (AFTER APPROVAL)**
+- Implement concrete repository in Data layer
+- Inject via Riverpod provider
+- Create mock for tests
+
+### Interface Design Guidelines
+
+A good interface:
+- **Minimal surface:** Only essential methods
+- **Clear semantics:** No ambiguous method names
+- **Explicit errors:** Use `Result<T, E>` type for operations that can fail
+- **No leaky abstractions:** No implementation details in signature
+- **Future-proof:** Easy to extend without breaking changes
+
+**Example of GOOD interface:**
+```dart
+abstract interface class IPaymentRepository {
+  Future<Result<Transaction, PaymentException>> processPayment({
+    required double amount,
+    required PaymentMethod method,
+  });
+}
+
+@freezed
+sealed class PaymentException with _$PaymentException {
+  const factory PaymentException.insufficientFunds() = InsufficientFundsException;
+  const factory PaymentException.invalidCard() = InvalidCardException;
+  const factory PaymentException.networkError() = NetworkErrorException;
+}
+```
+
+**Example of BAD interface:**
+```dart
+abstract class PaymentRepository {
+  // ❌ Too many methods
+  Future<bool> validateCard();
+  Future<String> chargeCard();
+  Future<Dio> getHttpClient();  // ❌ Leaky abstraction
+  Future<dynamic> process();     // ❌ Untyped return, no error modeling
+}
+```
+
+### Why This Matters
+1. **Human Review:** Developer reviews the contract before implementation
+2. **Testability:** Interface enables easy mocking
+3. **Flexibility:** Implementation can change without breaking dependents
+4. **Clarity:** Forces explicit definition of capabilities
+
+### Exceptions
+- Simple state providers (counter, toggle, form state)
+- Pure UI state with no I/O
+- Trivial helpers with no business logic
+
+---
+
+## 5. Modern Dart (3.6+)
 
 ### Isolate Offloading
 
 The Main Thread is for UI only.
 
-- **Rule:** ALWAYS use `Isolate.run()` for heavy synchronous tasks (JSON parsing large lists, image manipulation, complex sorting).
-- **Critical Pattern:** Functions and closures CANNOT be passed directly to isolates. Only pass primitive data types and reconstruct objects inside the isolate.
+**Rule:** Use `Isolate.run()` for heavy synchronous work (JSON parsing 100+ items, image processing, complex sorting).
 
-**Bad:**
-```dart
-// This will FAIL - fromJson callback cannot cross isolate boundary
-return await Isolate.run(() => fromJson(data));
-```
+**Critical:** Functions passed to isolates must be:
+- Top-level functions
+- Static class methods
+- **No closures that capture context**
 
-**Good:**
-```dart
-// Pass primitive data, parse inside isolate, return primitive result
-final jsonMap = response.data as Map<String, dynamic>;
-final parsedMap = await Isolate.run(() => jsonMap); // Can also do heavy computation here
-return fromJson(parsedMap); // Call on main isolate
-```
+**Common Mistakes:**
 
-**Better (for truly heavy parsing):**
 ```dart
-// Define top-level or static function for isolate
-static Map<String, dynamic> _heavyParse(String rawJson) {
-  return jsonDecode(rawJson); // Heavy work
+// ❌ WRONG - Instance method cannot cross isolate boundary
+await Isolate.run(() => repository.parseProducts(data));
+
+// ❌ WRONG - Closure captures variable
+final userId = currentUser.id;
+await Isolate.run(() => processUser(userId)); // Closure!
+
+// ❌ WRONG - Passing fromJson callback
+await Isolate.run(() => ProductDTO.fromJson(data));
+
+// ✅ CORRECT - Top-level or static function
+static List<ProductDTO> _parseProducts(List<dynamic> jsonList) {
+  return jsonList
+      .map((json) => ProductDTO.fromJson(json as Map<String, dynamic>))
+      .toList();
 }
 
 // Usage
-final parsed = await Isolate.run(() => _heavyParse(responseBody));
-final dto = UserDTO.fromJson(parsed);
+final jsonList = response.data as List;
+final products = await Isolate.run(() => _parseProducts(jsonList));
 ```
+
+**When to use:**
+- Parsing JSON arrays > 100 items
+- Image decoding/processing (use `compute()` for this)
+- Compute-heavy algorithms
+- Large file operations
+
+**When NOT to use:**
+- Simple JSON objects (< 50 fields)
+- Network calls (already async)
+- Database queries (use async APIs)
+- Small lists (< 50 items)
 
 ### Records & Patterns
 
-- Use **Records** `(double x, double y)` for returning multiple values from internal functions instead of creating throwaway helper classes.
-- Use **Pattern Matching** in `switch` statements/expressions for control flow, especially with `Freezed` unions.
+Use **Records** for returning multiple values from internal functions.
 
 ```dart
 // Good use of Records
@@ -83,24 +311,27 @@ final dto = UserDTO.fromJson(parsed);
   if (response.statusCode == 200) return (200, 'Success');
   return (response.statusCode ?? 0, 'Failed');
 }
+```
 
-// Pattern matching with Freezed
+Use **Pattern Matching** with `switch` expressions for control flow.
+
+```dart
 return switch (state) {
-  AsyncData(:final value) => Text(value.name),
+  AsyncData(:final value) => ContentView(value),
   AsyncLoading() => CircularProgressIndicator(),
-  AsyncError(:final error) => ErrorWidget(error),
+  AsyncError(:final error) => ErrorView(error),
   _ => SizedBox.shrink(),
 };
 ```
 
 ### Class Modifiers
 
-- Use `sealed` classes for State and Result types to enforce exhaustive pattern matching.
-- Use `interface` classes for Repositories to enforce strict contract implementation.
-- Use `final` class modifier for classes that should not be extended.
+- Use `sealed` for state/result types (exhaustive matching)
+- Use `interface` for repository contracts (strict implementation)
+- Use `final` for classes that shouldn't be extended
 
 ```dart
-// Domain Layer
+// State modeling
 sealed class AuthState {}
 final class Authenticated extends AuthState {
   final User user;
@@ -108,7 +339,7 @@ final class Authenticated extends AuthState {
 }
 final class Unauthenticated extends AuthState {}
 
-// Repository Contract
+// Repository contract
 abstract interface class IAuthRepository {
   Future<Result<User, AuthException>> login(String email, String password);
 }
@@ -116,25 +347,25 @@ abstract interface class IAuthRepository {
 
 ---
 
-## 2. Riverpod & State Management (Strict Rules)
+## 6. Riverpod & State Management
 
 ### Generator Mode
 
-- **ALWAYS** use `@riverpod` annotations. Never write manual providers.
-- Controllers must extend `_$MyController`.
-- The `build()` method is strictly for **Initialization**.
+- **ALWAYS** use `@riverpod` annotations
+- Never write manual providers
+- Controllers extend `_$ControllerName`
+- `build()` is strictly for initialization
 
 ### AsyncValue Pattern
 
-- Methods (Actions) return `Future<void>` and mutate `state`.
-- Use `AsyncValue.guard()` to automatically wrap try-catch and set `AsyncError` on failure.
+Methods (actions) return `Future<void>` and mutate `state`.
 
 ```dart
 @riverpod
 class UserController extends _$UserController {
   @override
   FutureOr<User> build(String userId) async {
-    // Initialization - fetch initial data
+    // Initialization only
     final repo = ref.read(userRepositoryProvider);
     return repo.getUser(userId);
   }
@@ -143,8 +374,7 @@ class UserController extends _$UserController {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       final repo = ref.read(userRepositoryProvider);
-      final updated = await repo.updateUser(name);
-      return updated;
+      return repo.updateUser(name);
     });
   }
 }
@@ -152,7 +382,7 @@ class UserController extends _$UserController {
 
 ### Optimistic Updates
 
-When mutating data (POST/PUT), update the local state **immediately** before the network call for snappy UX.
+Update local state immediately before network call.
 
 ```dart
 Future<void> toggleFavorite(String itemId) async {
@@ -173,11 +403,12 @@ Future<void> toggleFavorite(String itemId) async {
 
 ### Side Effects
 
-- **NEVER** trigger navigation or show Snackbars inside the `build` method.
-- Use `ref.listen` inside the Widget's `build` method to react to state changes.
+**NEVER** trigger navigation or show SnackBars inside `build()`.
+
+Use `ref.listen` in widget's `build()` to react to state changes.
 
 ```dart
-class ItemDetailView extends ConsumerWidget {
+class ItemView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen(itemControllerProvider, (previous, next) {
@@ -185,9 +416,6 @@ class ItemDetailView extends ConsumerWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(next.error.toString())),
         );
-      }
-      if (next is AsyncData && next.value?.isDeleted == true) {
-        context.pop(); // Navigate back after successful delete
       }
     });
 
@@ -199,24 +427,15 @@ class ItemDetailView extends ConsumerWidget {
 
 ### AutoDispose
 
-- Use `@riverpod` (auto-dispose by default) for screen-scoped state.
-- Use `keepAlive()` inside `build()` if state must survive widget disposal.
+- `@riverpod` is auto-dispose by default
+- Use `keepAlive()` in `build()` for persistent state
 
 ```dart
 @riverpod
-class SearchController extends _$SearchController {
+class AppConfig extends _$AppConfig {
   @override
-  FutureOr<List<Result>> build() async {
-    // Auto-disposed when widget is removed
-    return [];
-  }
-}
-
-@riverpod
-class AppConfigController extends _$AppConfigController {
-  @override
-  FutureOr<AppConfig> build() async {
-    ref.keepAlive(); // Keep alive across navigation
+  FutureOr<Config> build() async {
+    ref.keepAlive(); // Survives navigation
     return fetchConfig();
   }
 }
@@ -224,28 +443,34 @@ class AppConfigController extends _$AppConfigController {
 
 ---
 
-## 3. UI Best Practices & Impeller Performance
+## 7. SwiftUI View Rules
 
-### Slivers Strictness
+- `build()` must be small and pure
+- No business logic in widgets
+- Extract complex sub-widgets early
+- Prefer composition over conditionals
 
-For any scrollable list with potential for more than 20 items, **ALWAYS** use `CustomScrollView` with `SliverList` or `SliverGrid`. Avoid standard `ListView` for complex pages.
+### Lists & Performance
+
+Always use stable identity:
 
 ```dart
-// Good - Performant for large lists
-CustomScrollView(
-  slivers: [
-    SliverAppBar(title: Text('Items')),
-    SliverList.builder(
-      itemCount: items.length,
-      itemBuilder: (context, index) => ItemTile(items[index]),
-    ),
-  ],
+// Good
+ListView.builder(
+  itemCount: items.length,
+  itemBuilder: (context, index) {
+    final item = items[index];
+    return ItemTile(
+      key: ValueKey(item.id), // Stable identity
+      item: item,
+    );
+  },
 )
 ```
 
 ### Const Correctness
 
-Apply `const` constructors aggressively. This is critical for Flutter's widget caching mechanism.
+Apply `const` aggressively for widget caching:
 
 ```dart
 // Good
@@ -254,88 +479,180 @@ const Padding(
   child: Text('Hello'),
 )
 
-// Bad - Creates new widget instances on every rebuild
+// Bad - Creates new instances on every rebuild
 Padding(
   padding: EdgeInsets.all(16),
   child: Text('Hello'),
 )
 ```
 
-### Repaint Boundaries
+---
 
-Wrap high-frequency animation widgets (like loaders or timers) in `RepaintBoundary` to isolate layout calculation cost.
+## 8. Network Layer (Conditional)
+
+**When to use centralized ApiClient:**
+- Multiple features make network calls
+- Shared authentication/headers needed
+- Consistent error handling across app
+- Complex request/response pipeline
+
+**When direct Dio/http is acceptable:**
+- Simple background tasks (WorkManager)
+- One-off requests in prototypes
+- Single isolated network call with no shared config
+
+### Centralized Pattern (Multi-Feature Apps)
+
+Never call `Dio()` or `http.Client()` directly in feature code.
+
+**Required:**
 
 ```dart
-RepaintBoundary(
-  child: CircularProgressIndicator(),
-)
-```
+@riverpod
+Dio dio(DioRef ref) {
+  final dio = Dio(BaseOptions(
+    baseUrl: 'https://api.example.com',
+    connectTimeout: Duration(seconds: 10),
+  ));
+  
+  dio.interceptors.add(AuthInterceptor(ref));
+  dio.interceptors.add(LogInterceptor());
+  
+  return dio;
+}
 
-### Responsive Design
+@riverpod
+ApiClient apiClient(ApiClientRef ref) {
+  return ApiClient(ref.read(dioProvider));
+}
 
-- Use `LayoutBuilder` only when necessary. Prefer `Flex` and wrapping widgets.
-- For Foldable/Desktop support, use breakpoint-based layout switching.
+final class ApiClient {
+  final Dio _dio;
+  ApiClient(this._dio);
 
-```dart
-class ResponsiveLayout extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    return width < 600 ? MobileView() : TabletView();
+  Future<T> get<T>({
+    required String path,
+    required T Function(Map<String, dynamic>) fromJson,
+  }) async {
+    try {
+      final response = await _dio.get(path);
+      
+      if (response.statusCode == null || 
+          response.statusCode! < 200 || 
+          response.statusCode! >= 300) {
+        throw ServerException(statusCode: response.statusCode ?? 0);
+      }
+
+      final data = response.data as Map<String, dynamic>;
+      return fromJson(data);
+
+    } on DioException catch (e) {
+      throw NetworkException.fromDio(e);
+    }
   }
 }
 ```
 
-### Keys for Performance
+**Benefits:**
+- Single decoder configuration
+- Consistent error mapping
+- Auth header injection point
+- Request/response logging
 
-Use keys when reordering lists or when widgets of the same type appear at the same level.
+### Simple Pattern (Background Tasks, Prototypes)
+
+Direct http/Dio is acceptable when:
+- No shared configuration needed
+- One-off operation
+- No cross-feature consistency required
 
 ```dart
-ListView.builder(
-  itemCount: items.length,
-  itemBuilder: (context, index) {
-    final item = items[index];
-    return ItemTile(
-      key: ValueKey(item.id), // Helps Flutter identify widgets correctly
-      item: item,
-    );
-  },
-)
+@pragma('vm:entry-point')
+void backgroundFetchTask() async {
+  final response = await http.get(Uri.parse('https://api.example.com/ping'));
+  // Process...
+}
+```
+
+### Migration Trigger
+
+**Introduce ApiClient when:**
+- 3+ network call sites exist
+- Need shared auth headers
+- Same decoder config repeated
+- Error handling duplicated
+
+**Refactoring is straightforward:**
+```dart
+// Before: Scattered calls
+final response = await dio.get('/users');
+final user = UserDTO.fromJson(response.data);
+
+// After: Centralized
+final user = await ref.read(apiClientProvider).get(
+  path: '/users',
+  fromJson: UserDTO.fromJson,
+);
+```
+
+### Error Normalization
+
+```dart
+@freezed
+sealed class NetworkException with _$NetworkException implements Exception {
+  const factory NetworkException.noInternet() = NoInternetException;
+  const factory NetworkException.timeout() = TimeoutException;
+  const factory NetworkException.unauthorized() = UnauthorizedException;
+  const factory NetworkException.serverError(int code) = ServerException;
+
+  factory NetworkException.fromDio(DioException error) {
+    return switch (error.type) {
+      DioExceptionType.connectionTimeout || 
+      DioExceptionType.receiveTimeout => NetworkException.timeout(),
+      DioExceptionType.connectionError => NetworkException.noInternet(),
+      DioExceptionType.badResponse => switch (error.response?.statusCode) {
+        401 => NetworkException.unauthorized(),
+        >= 500 => NetworkException.serverError(error.response!.statusCode!),
+        _ => NetworkException.unknown('HTTP ${error.response?.statusCode}'),
+      },
+      _ => NetworkException.unknown(error.message ?? 'Unknown error'),
+    };
+  }
+}
 ```
 
 ---
 
-## 4. Service Layer & Data Safety
+## 9. Service Layer & Data Safety
 
 ### Repository Pattern
 
-- **Domain:** Define an `abstract interface class IAuthRepository`.
-- **Data:** Implement `class AuthRepository implements IAuthRepository`.
+- **Domain:** Define `abstract interface class IRepository`
+- **Data:** Implement `final class Repository implements IRepository`
 
 ```dart
 // domain/repositories/i_auth_repository.dart
 abstract interface class IAuthRepository {
   Future<Result<User, AuthException>> login(String email, String password);
-  Future<Result<void, AuthException>> logout();
 }
 
 // data/repositories/auth_repository.dart
 final class AuthRepository implements IAuthRepository {
   final ApiClient _client;
-  final FirebaseAuth _auth;
   
-  AuthRepository(this._client, this._auth);
+  AuthRepository(this._client);
 
   @override
   Future<Result<User, AuthException>> login(String email, String password) async {
     try {
-      final credential = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
+      final dto = await _client.post(
+        path: '/auth/login',
+        body: {'email': email, 'password': password},
+        fromJson: UserDTO.fromJson,
       );
-      return Result.success(User.fromFirebase(credential.user!));
-    } on FirebaseAuthException catch (e) {
-      return Result.failure(AuthException.fromFirebase(e));
+      return Result.success(dto.toDomain());
+    } on NetworkException catch (e) {
+      return Result.failure(AuthException.fromNetwork(e));
     }
   }
 }
@@ -343,8 +660,7 @@ final class AuthRepository implements IAuthRepository {
 
 ### DTOs vs Entities
 
-- **Strict Separation:** The UI (Presentation Layer) must **NEVER** see a Firestore `DocumentSnapshot` or a raw API JSON Map.
-- **Mapping:** Data Layer returns DTOs. Repositories map DTOs to Domain Entities.
+**Strict Separation:** UI must NEVER see raw API JSON or Firestore snapshots.
 
 ```dart
 // data/dtos/user_dto.dart
@@ -356,15 +672,10 @@ class UserDTO with _$UserDTO {
     @JsonKey(name: 'display_name') String? displayName,
   }) = _UserDTO;
 
-  factory UserDTO.fromJson(Map<String, dynamic> json) => _$UserDTOFromJson(json);
-  
-  factory UserDTO.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return UserDTO.fromJson(data);
-  }
+  factory UserDTO.fromJson(Map<String, dynamic> json) => 
+    _$UserDTOFromJson(json);
 }
 
-// Extension for mapping
 extension UserDTOX on UserDTO {
   UserEntity toDomain() => UserEntity(
     id: UserId(id),
@@ -376,38 +687,25 @@ extension UserDTOX on UserDTO {
 
 ### Result Type Pattern
 
-Use a `Result<T, E>` type for operations that can fail instead of throwing exceptions in the domain layer.
-
 ```dart
-// core/types/result.dart
 @freezed
 sealed class Result<T, E> with _$Result<T, E> {
   const factory Result.success(T data) = Success<T, E>;
   const factory Result.failure(E error) = Failure<T, E>;
 }
-
-// Usage
-Future<Result<User, AuthException>> login(String email, String password) async {
-  try {
-    final user = await _auth.signIn(email, password);
-    return Result.success(user);
-  } catch (e) {
-    return Result.failure(AuthException.unknown(e.toString()));
-  }
-}
 ```
 
 ---
 
-## 5. Firebase Integration
+## 10. Firebase Integration
 
 ### Isolation
 
-Firebase packages (`cloud_firestore`, `firebase_auth`) are strictly forbidden in the `domain` and `presentation` layers. They exist only in `data`.
+Firebase packages are forbidden in `domain` and `presentation`. They exist only in `data`.
 
 ### Type Safety
 
-Use `.withConverter<T>()` for Firestore references to ensure type safety.
+Use `.withConverter<T>()` for Firestore references:
 
 ```dart
 final usersRef = FirebaseFirestore.instance
@@ -417,14 +715,13 @@ final usersRef = FirebaseFirestore.instance
     toFirestore: (dto, _) => dto.toJson(),
   );
 
-// Now type-safe
 final userDoc = await usersRef.doc(userId).get();
 final user = userDoc.data(); // Returns UserDTO?, not dynamic
 ```
 
 ### Real-time Listeners
 
-Wrap Firestore streams in Riverpod StreamProviders.
+Wrap Firestore streams in Riverpod StreamProviders:
 
 ```dart
 @riverpod
@@ -444,188 +741,34 @@ Stream<List<Message>> chatMessages(ChatMessagesRef ref, String chatId) {
 
 ---
 
-## 6. Scalable Networking & HTTP Infrastructure
-
-### Centralized HTTP Client
-
-- **Prohibition:** NEVER instantiate `Dio` or `http.Client` directly inside a Repository.
-- **Single Source of Truth:** Create a dedicated `ApiClient` class provided via Riverpod.
-
-```dart
-// core/network/api_client.dart
-@riverpod
-Dio dio(DioRef ref) {
-  final dio = Dio(BaseOptions(
-    baseUrl: 'https://api.example.com',
-    connectTimeout: Duration(seconds: 10),
-    receiveTimeout: Duration(seconds: 10),
-  ));
-  
-  // Add interceptors for auth, logging, etc.
-  dio.interceptors.add(AuthInterceptor(ref));
-  dio.interceptors.add(LogInterceptor());
-  
-  return dio;
-}
-
-@riverpod
-ApiClient apiClient(ApiClientRef ref) {
-  return ApiClient(ref.read(dioProvider));
-}
-```
-
-### Generic Request Wrapper with Isolate Offloading
-
-```dart
-final class ApiClient {
-  final Dio _dio;
-  ApiClient(this._dio);
-
-  Future<T> get<T>({
-    required String path,
-    required T Function(Map<String, dynamic>) fromJson,
-    Map<String, dynamic>? queryParams,
-  }) async {
-    try {
-      final response = await _dio.get(path, queryParameters: queryParams);
-      
-      if (response.statusCode == null || response.statusCode! < 200 || response.statusCode! >= 300) {
-        throw ServerException(statusCode: response.statusCode ?? 0);
-      }
-
-      // Offload JSON parsing for large responses
-      final data = response.data;
-      if (data is! Map<String, dynamic>) {
-        throw ParseException('Expected JSON object');
-      }
-
-      // For large JSON, use isolate. For small responses, direct parsing is fine.
-      if (data.length > 100) { // Threshold for isolate usage
-        // Pass the Map directly - it's sendable
-        final parsed = await Isolate.run(() => data);
-        return fromJson(parsed);
-      } else {
-        return fromJson(data);
-      }
-
-    } on DioException catch (e) {
-      throw NetworkException.fromDio(e);
-    }
-  }
-
-  Future<T> post<T>({
-    required String path,
-    required T Function(Map<String, dynamic>) fromJson,
-    Map<String, dynamic>? body,
-  }) async {
-    try {
-      final response = await _dio.post(path, data: body);
-      
-      if (response.statusCode == null || response.statusCode! < 200 || response.statusCode! >= 300) {
-        throw ServerException(statusCode: response.statusCode ?? 0);
-      }
-
-      final data = response.data as Map<String, dynamic>;
-      return fromJson(data);
-
-    } on DioException catch (e) {
-      throw NetworkException.fromDio(e);
-    }
-  }
-}
-```
-
-### Error Normalization
-
-```dart
-// core/exceptions/network_exception.dart
-@freezed
-sealed class NetworkException with _$NetworkException implements Exception {
-  const factory NetworkException.noInternet() = NoInternetException;
-  const factory NetworkException.timeout() = TimeoutException;
-  const factory NetworkException.unauthorized() = UnauthorizedException;
-  const factory NetworkException.serverError(int statusCode) = ServerException;
-  const factory NetworkException.parseError(String message) = ParseException;
-  const factory NetworkException.unknown(String message) = UnknownException;
-
-  factory NetworkException.fromDio(DioException error) {
-    return switch (error.type) {
-      DioExceptionType.connectionTimeout || DioExceptionType.receiveTimeout => 
-        NetworkException.timeout(),
-      DioExceptionType.connectionError => 
-        NetworkException.noInternet(),
-      DioExceptionType.badResponse => switch (error.response?.statusCode) {
-        401 => NetworkException.unauthorized(),
-        >= 500 => NetworkException.serverError(error.response!.statusCode!),
-        _ => NetworkException.unknown('HTTP ${error.response?.statusCode}'),
-      },
-      _ => NetworkException.unknown(error.message ?? 'Unknown error'),
-    };
-  }
-}
-```
-
-### Retry Logic with Exponential Backoff
-
-```dart
-extension ApiClientRetry on ApiClient {
-  Future<T> getWithRetry<T>({
-    required String path,
-    required T Function(Map<String, dynamic>) fromJson,
-    int maxRetries = 3,
-  }) async {
-    var attempt = 0;
-    
-    while (true) {
-      try {
-        return await get(path: path, fromJson: fromJson);
-      } on NetworkException catch (e) {
-        attempt++;
-        
-        // Don't retry client errors
-        if (e is UnauthorizedException || attempt >= maxRetries) {
-          rethrow;
-        }
-        
-        // Exponential backoff: 1s, 2s, 4s
-        final delay = Duration(seconds: math.pow(2, attempt - 1).toInt());
-        await Future.delayed(delay);
-      }
-    }
-  }
-}
-```
-
----
-
-## 7. Performance & Optimization
+## 11. Performance & Optimization
 
 ### Profiling Strategy
 
-- **DevTools Performance View:** Profile regularly during development.
-  - **Frame Rendering:** Target 60fps (16.67ms per frame) or 120fps (8.33ms) on high-refresh displays.
-  - **Rebuild Stats:** Use Performance Overlay to identify excessive rebuilds.
-  - **Shader Compilation:** Pre-compile shaders using `--cache-sksl` flag.
+- **DevTools Performance:** Profile regularly, not just before release
+  - **Frame Rendering:** Target 60fps (16.67ms) or 120fps (8.33ms)
+  - **Rebuild Stats:** Use Performance Overlay
+  - **Shader Compilation:** Pre-compile with `--cache-sksl`
 
 ### Performance Budgets
 
-- **Widget Build Time:** < 16ms for any single widget's build method.
-- **API Response Handling:** < 50ms from data arrival to UI update.
-- **Image Decoding:** Always decode images in background using `Image.network` or `precacheImage`.
+- **Widget Build:** < 16ms per widget
+- **API Response Handling:** < 50ms from data to UI
+- **List Scrolling:** Maintain 60fps minimum
 
 ### Optimization Triggers
 
 | Symptom | Threshold | Action |
 |---------|-----------|--------|
-| Frame drops | < 60fps | Profile with DevTools, check for expensive build methods |
-| Jank during scroll | Noticeable stutter | Use `RepaintBoundary`, ensure `const` widgets, check list item complexity |
-| Slow initial render | > 500ms | Reduce initial widget tree size, lazy-load tabs |
-| Memory growth | > 100MB increase during normal use | Check for memory leaks, dispose controllers properly |
+| Frame drops | < 60fps | Profile, check expensive builds |
+| Jank during scroll | Noticeable stutter | `RepaintBoundary`, `const` widgets |
+| Slow initial render | > 500ms | Reduce widget tree, lazy-load |
+| Memory growth | > 100MB during normal use | Check for leaks, dispose properly |
 
-### Common Performance Patterns
+### Common Patterns
 
 ```dart
-// Bad - Rebuilds entire list on every state change
+// Bad - Rebuilds entire list
 Consumer(
   builder: (context, ref, _) {
     final items = ref.watch(itemsProvider);
@@ -666,24 +809,23 @@ ListView.builder(
 
 ---
 
-## 8. Accessibility (A11y) Standards
+## 12. Accessibility (A11y)
 
-### Semantics Widgets
+### Semantics
 
-Every interactive widget MUST have proper semantics for screen readers.
+Every interactive widget MUST have proper semantics:
 
 ```dart
-// Good
 Semantics(
   label: 'Delete item',
-  hint: 'Double tap to remove this item from your list',
+  hint: 'Double tap to remove this item',
   child: IconButton(
     icon: Icon(Icons.delete),
     onPressed: onDelete,
   ),
 )
 
-// Better - Use semantic properties directly
+// Better - Use semantic properties
 IconButton(
   icon: Icon(Icons.delete),
   tooltip: 'Delete item', // Provides semantic label
@@ -691,19 +833,9 @@ IconButton(
 )
 ```
 
-### Semantic Labels for Images
-
-```dart
-Image.asset(
-  'assets/logo.png',
-  semanticLabel: 'Company logo',
-)
-```
-
 ### Text Scaling
 
-- NEVER use fixed font sizes. Always use `Theme.of(context).textTheme` or relative sizing.
-- Test all screens with maximum text scaling (Settings > Accessibility > Large Text).
+Never use fixed font sizes:
 
 ```dart
 // Bad
@@ -715,14 +847,14 @@ Text('Hello', style: Theme.of(context).textTheme.bodyLarge)
 
 ### Color Contrast
 
-- Maintain WCAG AA contrast ratio (4.5:1 for normal text, 3:1 for large text).
-- Never rely solely on color to convey information. Use icons, labels, or patterns.
+- WCAG AA contrast (4.5:1 normal, 3:1 large text)
+- Never rely on color alone
 
 ```dart
-// Bad - Color alone indicates status
+// Bad
 Container(color: isActive ? Colors.green : Colors.red)
 
-// Good - Color + Icon
+// Good
 Row(
   children: [
     Icon(isActive ? Icons.check_circle : Icons.error),
@@ -733,292 +865,31 @@ Row(
 
 ### Reduce Motion
 
-Check for reduce motion preference before complex animations.
-
 ```dart
 final mediaQuery = MediaQuery.of(context);
 final disableAnimations = mediaQuery.disableAnimations;
 
 AnimatedContainer(
   duration: disableAnimations ? Duration.zero : Duration(milliseconds: 300),
-  curve: Curves.easeInOut,
   // ...
 )
 ```
 
 ---
 
-## 9. Error Recovery & Resilience
-
-### Offline Mode
-
-- **Local-First Architecture:** Write to local database immediately, sync to backend asynchronously.
-- **Queue Failed Operations:** Store failed mutations and retry when connectivity returns.
-
-```dart
-@riverpod
-class SyncController extends _$SyncController {
-  @override
-  FutureOr<void> build() {}
-
-  Future<void> syncPendingOperations() async {
-    final pendingOps = await ref.read(localDbProvider).getPendingOperations();
-    
-    for (final op in pendingOps) {
-      try {
-        await ref.read(apiClientProvider).post(
-          path: op.endpoint,
-          body: op.data,
-          fromJson: (_) => {},
-        );
-        await ref.read(localDbProvider).markSynced(op.id);
-      } catch (e) {
-        // Will retry on next sync
-        continue;
-      }
-    }
-  }
-}
-```
-
-### Connectivity Monitoring
-
-```dart
-@riverpod
-Stream<ConnectivityResult> connectivity(ConnectivityRef ref) {
-  return Connectivity().onConnectivityChanged;
-}
-
-// Usage in UI
-ref.listen(connectivityProvider, (previous, next) {
-  if (next.value == ConnectivityResult.none) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('No internet connection')),
-    );
-  } else if (previous?.value == ConnectivityResult.none) {
-    ref.read(syncControllerProvider.notifier).syncPendingOperations();
-  }
-});
-```
-
-### Graceful Degradation
-
-- Display cached content with timestamp when backend is unavailable.
-- Provide clear error messages with actionable next steps.
-
-```dart
-return switch (state) {
-  AsyncData(:final value) => ContentView(value),
-  AsyncError(:final error) => ErrorView(
-    message: error.toString(),
-    onRetry: () => ref.invalidate(dataProvider),
-  ),
-  AsyncLoading() when state.value != null => ContentView(
-    state.value!, // Show stale data while refreshing
-    isStale: true,
-  ),
-  _ => LoadingView(),
-};
-```
-
----
-
-## 10. Navigation (GoRouter)
-
-### Type-Safe Routes
-
-```dart
-// core/router/app_router.dart
-@riverpod
-GoRouter goRouter(GoRouterRef ref) {
-  return GoRouter(
-    initialLocation: '/home',
-    routes: [
-      GoRoute(
-        path: '/home',
-        name: AppRoute.home.name,
-        builder: (context, state) => HomeView(),
-      ),
-      GoRoute(
-        path: '/item/:id',
-        name: AppRoute.itemDetail.name,
-        builder: (context, state) {
-          final id = state.pathParameters['id']!;
-          return ItemDetailView(itemId: id);
-        },
-      ),
-    ],
-  );
-}
-
-enum AppRoute {
-  home,
-  itemDetail,
-}
-
-// Extension for type-safe navigation
-extension GoRouterX on GoRouter {
-  void goToItemDetail(String id) {
-    goNamed(AppRoute.itemDetail.name, pathParameters: {'id': id});
-  }
-}
-```
-
-### Deep Linking
-
-```dart
-GoRoute(
-  path: '/item/:id',
-  builder: (context, state) {
-    final id = state.pathParameters['id']!;
-    final fromNotification = state.uri.queryParameters['notification'] == 'true';
-    return ItemDetailView(itemId: id, highlightNew: fromNotification);
-  },
-)
-```
-
-### Navigation Error Handling
-
-```dart
-@riverpod
-GoRouter goRouter(GoRouterRef ref) {
-  return GoRouter(
-    errorBuilder: (context, state) => ErrorView(
-      message: 'Page not found: ${state.uri}',
-      onRetry: () => context.go('/home'),
-    ),
-    redirect: (context, state) {
-      final isAuthenticated = ref.read(authStateProvider).value != null;
-      final isLoginRoute = state.matchedLocation == '/login';
-
-      if (!isAuthenticated && !isLoginRoute) {
-        return '/login';
-      }
-      return null;
-    },
-  );
-}
-```
-
----
-
-## 11. AI & LLM Integration (Vertex AI / Gemini)
-
-### Streaming Responses
-
-When generating long text (e.g., chat), ALWAYS use `StreamProvider` to render chunks as they arrive.
-
-```dart
-@riverpod
-Stream<String> aiChatResponse(AiChatResponseRef ref, String prompt) async* {
-  final model = ref.read(geminiModelProvider);
-  final response = model.generateContentStream([Content.text(prompt)]);
-  
-  var accumulated = '';
-  await for (final chunk in response) {
-    accumulated += chunk.text ?? '';
-    yield accumulated;
-  }
-}
-
-// Usage in UI
-class ChatView extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final responseStream = ref.watch(aiChatResponseProvider(prompt));
-    
-    return responseStream.when(
-      data: (text) => Text(text),
-      loading: () => CircularProgressIndicator(),
-      error: (error, stack) => ErrorWidget(error),
-    );
-  }
-}
-```
-
-### Structured Output
-
-Use strict schemas with the model instead of parsing raw markdown.
-
-```dart
-@freezed
-class RecipeResponse with _$RecipeResponse {
-  const factory RecipeResponse({
-    required String title,
-    required List<String> ingredients,
-    required List<String> steps,
-    required int prepTimeMinutes,
-  }) = _RecipeResponse;
-
-  factory RecipeResponse.fromJson(Map<String, dynamic> json) => 
-    _$RecipeResponseFromJson(json);
-}
-
-Future<RecipeResponse> generateRecipe(String prompt) async {
-  final response = await model.generateContent([
-    Content.text(prompt),
-    Content.text('Respond ONLY with valid JSON matching this schema: ${recipeSchema}'),
-  ]);
-  
-  final jsonText = response.text ?? '';
-  final jsonMap = jsonDecode(jsonText);
-  return RecipeResponse.fromJson(jsonMap);
-}
-```
-
-### Context Management
-
-Maintain chat history in a dedicated class within the Domain layer.
-
-```dart
-@freezed
-class ChatSession with _$ChatSession {
-  const factory ChatSession({
-    required String id,
-    required List<ChatMessage> messages,
-    @Default(4096) int maxTokens,
-  }) = _ChatSession;
-
-  const ChatSession._();
-
-  bool get isNearTokenLimit => _estimateTokens() > maxTokens * 0.8;
-
-  int _estimateTokens() {
-    // Rough estimation: 1 token ≈ 4 characters
-    final totalChars = messages.fold(0, (sum, msg) => sum + msg.content.length);
-    return totalChars ~/ 4;
-  }
-
-  ChatSession addMessage(ChatMessage message) {
-    if (isNearTokenLimit) {
-      // Keep only recent messages
-      return copyWith(messages: [...messages.skip(messages.length ~/ 2), message]);
-    }
-    return copyWith(messages: [...messages, message]);
-  }
-}
-```
-
----
-
-## 12. Testing Standards
+## 13. Testing Standards
 
 ### Robot Pattern (Widget Tests)
 
-Do not write spaghetti widget tests. Create "Robot" classes (PageObjects) for each screen.
+Create PageObject classes for each screen:
 
 ```dart
-// test/robots/login_robot.dart
 class LoginRobot {
   final WidgetTester tester;
   LoginRobot(this.tester);
 
   Future<void> enterEmail(String email) async {
     await tester.enterText(find.byKey(Key('email_field')), email);
-  }
-
-  Future<void> enterPassword(String password) async {
-    await tester.enterText(find.byKey(Key('password_field')), password);
   }
 
   Future<void> tapLoginButton() async {
@@ -1029,782 +900,143 @@ class LoginRobot {
   void expectErrorMessage(String message) {
     expect(find.text(message), findsOneWidget);
   }
-
-  void expectLoadingIndicator() {
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-  }
 }
 
-// test/features/auth/login_test.dart
-void main() {
-  testWidgets('Login flow shows error on invalid credentials', (tester) async {
-    final robot = LoginRobot(tester);
-    
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        authRepositoryProvider.overrideWithValue(MockAuthRepository()),
-      ],
-      child: MaterialApp(home: LoginView()),
-    ));
+// Usage
+testWidgets('Login shows error on invalid credentials', (tester) async {
+  final robot = LoginRobot(tester);
+  
+  await tester.pumpWidget(ProviderScope(
+    overrides: [
+      authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+    ],
+    child: MaterialApp(home: LoginView()),
+  ));
 
-    await robot.enterEmail('invalid@test.com');
-    await robot.enterPassword('wrong');
-    await robot.tapLoginButton();
-
-    robot.expectErrorMessage('Invalid credentials');
-  });
-}
+  await robot.enterEmail('invalid@test.com');
+  await robot.tapLoginButton();
+  robot.expectErrorMessage('Invalid credentials');
+});
 ```
 
 ### Unit Tests for Controllers
 
-Test Controllers by mocking Repositories using `mocktail`. Verify `state` transitions.
+Test state transitions:
 
 ```dart
-class MockUserRepository extends Mock implements IUserRepository {}
-
-void main() {
-  group('UserController', () {
-    late MockUserRepository mockRepo;
-    late ProviderContainer container;
-
-    setUp(() {
-      mockRepo = MockUserRepository();
-      container = ProviderContainer(
-        overrides: [
-          userRepositoryProvider.overrideWithValue(mockRepo),
-        ],
-      );
-    });
-
-    tearDown(() {
-      container.dispose();
-    });
-
-    test('successful login updates state to AsyncData', () async {
-      final user = User(id: '1', email: 'test@test.com');
-      when(() => mockRepo.login(any(), any())).thenAnswer((_) async => Result.success(user));
-
-      final controller = container.read(loginControllerProvider.notifier);
-      
-      await controller.login('test@test.com', 'password');
-
-      final state = container.read(loginControllerProvider);
-      expect(state, isA<AsyncData>());
-      expect(state.value, user);
-    });
-
-    test('failed login updates state to AsyncError', () async {
-      when(() => mockRepo.login(any(), any()))
-        .thenAnswer((_) async => Result.failure(AuthException.invalidCredentials()));
-
-      final controller = container.read(loginControllerProvider.notifier);
-      
-      await controller.login('test@test.com', 'wrong');
-
-      final state = container.read(loginControllerProvider);
-      expect(state, isA<AsyncError>());
-    });
-  });
-}
-```
-
-### Golden Tests
-
-Use golden tests to catch visual regressions.
-
-```dart
-void main() {
-  testWidgets('ItemCard renders correctly', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ItemCard(
-            item: Item(
-              id: '1',
-              title: 'Test Item',
-              price: 99.99,
-            ),
-          ),
-        ),
-      ),
-    );
-
-    await expectLater(
-      find.byType(ItemCard),
-      matchesGoldenFile('goldens/item_card.png'),
-    );
-  });
-}
-```
-
-### Integration Tests
-
-```dart
-// integration_test/app_test.dart
-void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-
-  testWidgets('Full user journey: login -> browse -> add to cart -> checkout', (tester) async {
-    app.main();
-    await tester.pumpAndSettle();
-
-    // Login
-    await tester.enterText(find.byKey(Key('email_field')), 'test@test.com');
-    await tester.enterText(find.byKey(Key('password_field')), 'password');
-    await tester.tap(find.byKey(Key('login_button')));
-    await tester.pumpAndSettle();
-
-    // Browse items
-    expect(find.text('Items'), findsOneWidget);
-    await tester.tap(find.text('Item 1'));
-    await tester.pumpAndSettle();
-
-    // Add to cart
-    await tester.tap(find.byKey(Key('add_to_cart_button')));
-    await tester.pumpAndSettle();
-
-    // Checkout
-    await tester.tap(find.byIcon(Icons.shopping_cart));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Checkout'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Order Confirmed'), findsOneWidget);
-  });
-}
-```
-
----
-
-## 13. Freezed Patterns
-
-### Default Values
-
-```dart
-@freezed
-class UserSettings with _$UserSettings {
-  const factory UserSettings({
-    @Default(true) bool notificationsEnabled,
-    @Default(ThemeMode.system) ThemeMode themeMode,
-    @Default([]) List<String> favoriteCategories,
-  }) = _UserSettings;
-
-  factory UserSettings.fromJson(Map<String, dynamic> json) => 
-    _$UserSettingsFromJson(json);
-}
-```
-
-### Union Types (Sealed Classes)
-
-```dart
-@freezed
-sealed class LoadingState<T> with _$LoadingState<T> {
-  const factory LoadingState.initial() = Initial<T>;
-  const factory LoadingState.loading() = Loading<T>;
-  const factory LoadingState.success(T data) = Success<T>;
-  const factory LoadingState.error(String message) = Error<T>;
-}
-
-// Usage with exhaustive pattern matching
-Widget buildUI(LoadingState<List<Item>> state) {
-  return switch (state) {
-    Initial() => WelcomeView(),
-    Loading() => CircularProgressIndicator(),
-    Success(:final data) => ItemList(data),
-    Error(:final message) => ErrorView(message),
-  };
-}
-```
-
-### CopyWith vs Rebuild
-
-```dart
-// CopyWith - For updating few fields
-final updatedUser = user.copyWith(name: 'New Name');
-
-// Rebuild - For creating similar objects
-final newUser = user.copyWith.call(
-  id: 'new_id',
-  name: 'Different User',
-  email: 'new@email.com',
-);
-```
-
----
-
-## 14. Memory Management
-
-### Dispose Controllers
-
-Controllers annotated with `@riverpod` (without `keepAlive`) are automatically disposed when no longer watched.
-
-For manual resource cleanup:
-
-```dart
-@riverpod
-class TimerController extends _$TimerController {
-  Timer? _timer;
-
-  @override
-  int build() {
-    ref.onDispose(() {
-      _timer?.cancel();
-    });
-    
-    _timer = Timer.periodic(Duration(seconds: 1), (_) {
-      state++;
-    });
-    
-    return 0;
-  }
-}
-```
-
-### Stream Subscriptions
-
-```dart
-@riverpod
-class LocationController extends _$LocationController {
-  StreamSubscription<Position>? _subscription;
-
-  @override
-  FutureOr<Position?> build() {
-    ref.onDispose(() {
-      _subscription?.cancel();
-    });
-
-    _subscription = Geolocator.getPositionStream().listen((position) {
-      state = AsyncData(position);
-    });
-
-    return null;
-  }
-}
-```
-
-### Image Caching
-
-```dart
-// Precache images to avoid repeated network requests
-@override
-void didChangeDependencies() {
-  super.didChangeDependencies();
-  precacheImage(NetworkImage(item.imageUrl), context);
-}
-
-// Clear cache when needed
-imageCache.clear();
-imageCache.clearLiveImages();
-```
-
----
-
-## 15. Analytics & Observability
-
-### Structured Logging
-
-```dart
-// core/logger/app_logger.dart
-import 'package:logger/logger.dart';
-
-final logger = Logger(
-  printer: PrettyPrinter(
-    methodCount: 0,
-    errorMethodCount: 5,
-    lineLength: 50,
-  ),
-);
-
-// Usage
-logger.d('Debug message');
-logger.i('Info message');
-logger.w('Warning message');
-logger.e('Error message', error: exception, stackTrace: stackTrace);
-```
-
-### Analytics Events
-
-```dart
-// core/analytics/analytics_service.dart
-abstract interface class IAnalyticsService {
-  void logEvent(String name, {Map<String, dynamic>? parameters});
-  void logScreenView(String screenName);
-  void setUserId(String userId);
-}
-
-final class FirebaseAnalyticsService implements IAnalyticsService {
-  final FirebaseAnalytics _analytics;
-  FirebaseAnalyticsService(this._analytics);
-
-  @override
-  void logEvent(String name, {Map<String, dynamic>? parameters}) {
-    _analytics.logEvent(name: name, parameters: parameters);
-  }
-
-  @override
-  void logScreenView(String screenName) {
-    _analytics.logScreenView(screenName: screenName);
-  }
-
-  @override
-  void setUserId(String userId) {
-    _analytics.setUserId(id: userId);
-  }
-}
-
-// Usage
-ref.read(analyticsServiceProvider).logEvent(
-  'item_purchased',
-  parameters: {
-    'item_id': item.id,
-    'price': item.price,
-    'currency': 'USD',
-  },
-);
-```
-
-### Crash Reporting
-
-```dart
-// main.dart
-void main() {
-  runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    await Firebase.initializeApp();
-    
-    FlutterError.onError = (details) {
-      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-    };
-
-    PlatformDispatcher.instance.onError = (error, stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-      return true;
-    };
-
-    runApp(ProviderScope(child: MyApp()));
-  }, (error, stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack);
-  });
-}
-```
-
----
-
-## 16. Code Complexity & Refactoring Thresholds
-
-### Cyclomatic Complexity
-
-- **Function Level:** Max complexity of 10. If exceeded, decompose into helper functions.
-- **Widget Level:** Max 300 lines per widget file. Split into smaller widgets.
-
-### Refactoring Triggers
-
-| Metric | Threshold | Action |
-|--------|-----------|--------|
-| Widget build method | > 100 lines | Extract sub-widgets |
-| Controller methods | > 50 lines | Extract helper methods |
-| Number of providers | > 15 in one file | Split into multiple files |
-| Nested callbacks | > 3 levels deep | Use async/await or extract functions |
-
-### Code Review Checklist
-
-Before merging PR:
-1. All state transitions tested in unit tests.
-2. No `dynamic` types except for JSON parsing.
-3. All async operations properly handled (no unawaited futures).
-4. Semantics labels added for interactive widgets.
-5. Performance profiled on low-end device.
-
----
-
-## 17. Trade-off Guidelines
-
-### Performance vs. Readability
-
-**Prefer Readability by Default:**
-- Optimize only when profiling identifies a bottleneck.
-- Document performance-critical sections.
-
-```dart
-// Performance-critical: Rendering 10,000+ items
-// Using const and keys to minimize rebuilds
-ListView.builder(
-  itemCount: items.length,
-  itemBuilder: (context, index) {
-    return ItemTile(
-      key: ValueKey(items[index].id), // Helps Flutter identify widgets
-      item: items[index],
-    );
-  },
-)
-```
-
-### Abstraction vs. Simplicity
-
-- **Rule of Three:** Don't abstract until the same pattern appears three times.
-- **Interface Overhead:** Only introduce interfaces when multiple implementations exist or for testing boundaries.
-
-### Type Safety vs. Flexibility
-
-- **Strongly Typed Preferred:** Use `sealed` classes with pattern matching over `dynamic` types.
-- **Exception:** JSON parsing can use `Map<String, dynamic>` at the boundary, then immediately convert to typed DTOs.
-
----
-
-# Anti-Patterns (Strictly Forbidden)
-
-- **Logic in UI:** `onTap: () async { await firestore.collection... }` is strictly prohibited. Call a Controller method.
-- **BuildContext Gaps:** Do not use `BuildContext` across async gaps (`await`). If unavoidable, check `context.mounted`.
-- **GetX / Global State:** Do not use `Get` or global singletons. Rely strictly on Riverpod.
-- **Mutable State:** Never use non-final fields in State classes. Use `copyWith` to generate new state.
-- **Uncaught Async Errors:** Never leave a `Future` unawaited without a `runZonedGuarded` or `AsyncValue.guard`.
-- **Direct Firebase in UI:** Never import `cloud_firestore` in presentation layer.
-- **Manual Providers:** Never write providers manually - always use `@riverpod` generator.
-- **Unoptimized Lists:** Never use `ListView` without `.builder` for lists > 20 items.
-
-**Strictly do NOT use emojis in any part of your response (text or code comments).**
-
----
-
-# Instruction for Code Generation
-
-When asked to build a feature, follow this flow:
-
-1. **Domain:** Define the `Entity` (Freezed) and `Repository Interface`.
-2. **Data:** Implement the Repository (with proper isolate usage for heavy parsing) and DTOs.
-3. **Presentation (Logic):** Create a `@riverpod` Controller (AsyncNotifier) implementing the logic.
-4. **Presentation (UI):** Build the Widget using `ConsumerWidget`. Use `ref.watch` for UI and `ref.read` for actions.
-
----
-
-## Example: Complete Feature Implementation
-
-### Domain Layer
-
-```dart
-// domain/entities/product_entity.dart
-@freezed
-class ProductEntity with _$ProductEntity {
-  const factory ProductEntity({
-    required String id,
-    required String name,
-    required double price,
-    required String imageUrl,
-    @Default(false) bool isFavorite,
-  }) = _ProductEntity;
-}
-
-// domain/repositories/i_product_repository.dart
-abstract interface class IProductRepository {
-  Future<Result<List<ProductEntity>, NetworkException>> getProducts();
-  Future<Result<ProductEntity, NetworkException>> getProductById(String id);
-  Future<Result<void, NetworkException>> toggleFavorite(String id);
-}
-```
-
-### Data Layer
-
-```dart
-// data/dtos/product_dto.dart
-@freezed
-class ProductDTO with _$ProductDTO {
-  const factory ProductDTO({
-    required String id,
-    required String name,
-    required double price,
-    @JsonKey(name: 'image_url') required String imageUrl,
-    @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
-  }) = _ProductDTO;
-
-  factory ProductDTO.fromJson(Map<String, dynamic> json) => 
-    _$ProductDTOFromJson(json);
-}
-
-extension ProductDTOX on ProductDTO {
-  ProductEntity toDomain() => ProductEntity(
-    id: id,
-    name: name,
-    price: price,
-    imageUrl: imageUrl,
-    isFavorite: isFavorite,
+test('successful login updates state to AsyncData', () async {
+  final mockRepo = MockUserRepository();
+  when(() => mockRepo.login(any(), any()))
+    .thenAnswer((_) async => Result.success(User(id: '1')));
+
+  final container = ProviderContainer(
+    overrides: [
+      userRepositoryProvider.overrideWithValue(mockRepo),
+    ],
   );
-}
 
-// data/repositories/product_repository.dart
-final class ProductRepository implements IProductRepository {
-  final ApiClient _client;
-  ProductRepository(this._client);
+  final controller = container.read(loginControllerProvider.notifier);
+  await controller.login('test@test.com', 'password');
 
-  @override
-  Future<Result<List<ProductEntity>, NetworkException>> getProducts() async {
-    try {
-      final dtos = await _client.get<List<ProductDTO>>(
-        path: '/products',
-        fromJson: (json) {
-          final list = json['data'] as List;
-          return list.map((item) => ProductDTO.fromJson(item)).toList();
-        },
-      );
-      return Result.success(dtos.map((dto) => dto.toDomain()).toList());
-    } on NetworkException catch (e) {
-      return Result.failure(e);
-    }
-  }
-
-  @override
-  Future<Result<ProductEntity, NetworkException>> getProductById(String id) async {
-    try {
-      final dto = await _client.get<ProductDTO>(
-        path: '/products/$id',
-        fromJson: ProductDTO.fromJson,
-      );
-      return Result.success(dto.toDomain());
-    } on NetworkException catch (e) {
-      return Result.failure(e);
-    }
-  }
-
-  @override
-  Future<Result<void, NetworkException>> toggleFavorite(String id) async {
-    try {
-      await _client.post(
-        path: '/products/$id/favorite',
-        fromJson: (_) => {},
-      );
-      return Result.success(null);
-    } on NetworkException catch (e) {
-      return Result.failure(e);
-    }
-  }
-}
-
-@riverpod
-IProductRepository productRepository(ProductRepositoryRef ref) {
-  return ProductRepository(ref.read(apiClientProvider));
-}
+  final state = container.read(loginControllerProvider);
+  expect(state, isA<AsyncData>());
+  expect(state.value?.id, '1');
+});
 ```
 
-### Presentation Layer - Controller
+---
+
+## 14. Anti-Patterns (FORBIDDEN)
+
+These patterns are **strictly forbidden**:
+
+### State Management
+- ❌ **Logic in UI:** `onTap: () async { await firestore... }` 
+  - ✅ Use: Controller methods
+- ❌ **Caching providers in local variables:** `late final controller = ref.read(...)`
+  - ✅ Use: `ref.watch()` in build method
+- ❌ **BuildContext across async gaps:** Using `context` after `await` without checking `mounted`
+  - ✅ Use: Check `context.mounted` before navigation/SnackBars
+
+### Architecture
+- ❌ **Direct Firebase in UI:** Importing `cloud_firestore` in presentation layer
+  - ✅ Use: Repository abstraction in data layer
+- ❌ **Manual providers:** Writing providers without `@riverpod`
+  - ✅ Use: Generator mode only
+- ❌ **GetX / Global state:** Using `Get.find()` or singletons
+  - ✅ Use: Riverpod dependency injection
+
+### Performance
+- ❌ **Unoptimized lists:** Using `ListView` without `.builder` for > 20 items
+  - ✅ Use: `ListView.builder` with keys
+- ❌ **Missing const:** Widget constructors without `const`
+  - ✅ Use: `const` everywhere possible
+
+### Concurrency
+- ❌ **Unawaited futures:** Fire-and-forget async calls
+  - ✅ Use: `await` or `unawaited()` with comment
+- ❌ **Closures in isolates:** Passing callbacks to `Isolate.run()`
+  - ✅ Use: Static/top-level functions only
+
+### Common Mistakes
 
 ```dart
-// presentation/controllers/products_controller.dart
-part 'products_controller.g.dart';
-
-@riverpod
-class ProductsController extends _$ProductsController {
+// ❌ WRONG - Caching provider reference
+class MyWidget extends ConsumerStatefulWidget {
   @override
-  FutureOr<List<ProductEntity>> build() async {
-    final repo = ref.read(productRepositoryProvider);
-    final result = await repo.getProducts();
-    
-    return switch (result) {
-      Success(:final data) => data,
-      Failure(:final error) => throw error,
-    };
-  }
-
-  Future<void> toggleFavorite(String productId) async {
-    final currentProducts = state.value ?? [];
-    final index = currentProducts.indexWhere((p) => p.id == productId);
-    
-    if (index == -1) return;
-
-    // Optimistic update
-    final updatedProduct = currentProducts[index].copyWith(
-      isFavorite: !currentProducts[index].isFavorite,
-    );
-    final updatedList = [...currentProducts];
-    updatedList[index] = updatedProduct;
-    state = AsyncData(updatedList);
-
-    // API call
-    final repo = ref.read(productRepositoryProvider);
-    final result = await repo.toggleFavorite(productId);
-
-    // Revert on failure
-    if (result is Failure) {
-      state = AsyncData(currentProducts);
-      rethrow;
-    }
-  }
-
-  Future<void> refresh() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final repo = ref.read(productRepositoryProvider);
-      final result = await repo.getProducts();
-      return switch (result) {
-        Success(:final data) => data,
-        Failure(:final error) => throw error,
-      };
-    });
-  }
-}
-```
-
-### Presentation Layer - UI
-
-```dart
-// presentation/widgets/product_card.dart
-class ProductCard extends StatelessWidget {
-  final ProductEntity product;
-  final VoidCallback onTap;
-  final VoidCallback onFavoriteToggle;
-
-  const ProductCard({
-    required this.product,
-    required this.onTap,
-    required this.onFavoriteToggle,
-    Key? key,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Stack(
-              children: [
-                Image.network(
-                  product.imageUrl,
-                  height: 150,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  semanticLabel: product.name,
-                ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: IconButton(
-                    icon: Icon(
-                      product.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: product.isFavorite ? Colors.red : Colors.grey,
-                    ),
-                    tooltip: product.isFavorite ? 'Remove from favorites' : 'Add to favorites',
-                    onPressed: onFavoriteToggle,
-                  ),
-                ),
-              ],
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.name,
-                    style: Theme.of(context).textTheme.titleMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '\${product.price.toStringAsFixed(2)}',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  ConsumerState<MyWidget> createState() => _MyWidgetState();
 }
 
-// presentation/views/products_view.dart
-class ProductsView extends ConsumerWidget {
-  const ProductsView({Key? key}) : super(key: key);
+class _MyWidgetState extends ConsumerState<MyWidget> {
+  late final controller = ref.read(myControllerProvider); // Won't rebuild!
+}
 
+// ✅ CORRECT
+class MyWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(productsControllerProvider);
-
-    ref.listen(productsControllerProvider, (previous, next) {
-      if (next is AsyncError) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${next.error}')),
-        );
-      }
-    });
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Products'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh products',
-            onPressed: () {
-              ref.read(productsControllerProvider.notifier).refresh();
-            },
-          ),
-        ],
-      ),
-      body: switch (state) {
-        AsyncData(:final value) => RefreshIndicator(
-          onRefresh: () async {
-            await ref.read(productsControllerProvider.notifier).refresh();
-          },
-          child: GridView.builder(
-            padding: const EdgeInsets.all(16),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.7,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-            ),
-            itemCount: value.length,
-            itemBuilder: (context, index) {
-              final product = value[index];
-              return ProductCard(
-                key: ValueKey(product.id),
-                product: product,
-                onTap: () {
-                  context.pushNamed(
-                    AppRoute.productDetail.name,
-                    pathParameters: {'id': product.id},
-                  );
-                },
-                onFavoriteToggle: () {
-                  ref
-                      .read(productsControllerProvider.notifier)
-                      .toggleFavorite(product.id);
-                },
-              );
-            },
-          ),
-        ),
-        AsyncError(:final error) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
-              Text('Error: $error'),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {
-                  ref.invalidate(productsControllerProvider);
-                },
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-        AsyncLoading() => const Center(
-          child: CircularProgressIndicator(),
-        ),
-        _ => const SizedBox.shrink(),
-      },
-    );
+    final controller = ref.watch(myControllerProvider);
+    return Text(controller.value);
   }
 }
 ```
+
+---
+
+## 15. Agent Conduct (Meta Rules)
+
+**Do NOT:**
+- Apply formatting beyond standard `dart format`
+- Reorder widget properties
+- Enforce architectures beyond this doc
+
+**Communication:**
+- "consider" / "suggest" for optimizations
+- "must" / "never" only for correctness
+
+**When uncertain:** Exclude guidance.
+
+---
+
+### Contract-First Workflow (STRICT)
+
+When implementing a new feature:
+
+1. **ALWAYS present the interface definition FIRST**
+2. Say: "Here's the proposed repository interface. Should I proceed with implementation?"
+3. **WAIT** for human approval
+4. Only then implement the concrete repository
+5. Show controller integration last
+
+**Never skip the interface review step.**
+
+---
+
+## Philosophy
+
+- Contracts over concreteness
+- Boundaries over convenience
+- Interfaces over implementations
+- Pragmatism over dogma
+
+**Strict where it matters. Flexible where it doesn't.**
