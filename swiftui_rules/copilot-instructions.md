@@ -1,7 +1,5 @@
 # iOS Project Rules — SwiftUI, Intents & Architecture
 
-
-
 ---
 
 ## 1. Role & Persona
@@ -70,50 +68,49 @@ App/
 - Inject via initializer into ViewModel
 - Create protocol-based mock for tests
 
+### Protocol Design Guidelines
+
+A good protocol:
+- **Minimal surface:** Only essential methods
+- **Clear semantics:** No ambiguous method names
+- **Explicit errors:** All failure modes in typed throws enum
+- **No leaky abstractions:** No implementation details in signature
+- **Future-proof:** Easy to extend without breaking changes
+
+**Example of GOOD protocol:**
+```swift
+protocol PaymentService: Sendable {
+    func process(
+        amount: Decimal,
+        method: PaymentMethod
+    ) async throws(PaymentError) -> Transaction
+}
+
+enum PaymentError: Error {
+    case insufficientFunds
+    case invalidPaymentMethod
+    case networkFailure
+    case timeout
+    case rateLimited(retryAfter: TimeInterval)
+}
+```
+
+**Example of BAD protocol:**
+```swift
+protocol PaymentService {
+    // ❌ Too many methods
+    func validateCard() -> Bool
+    func chargeCard() -> String
+    func getStripeClient() -> StripeClient  // ❌ Leaky abstraction
+    func process() throws -> Any  // ❌ Untyped errors, Any return
+}
+```
+
 ### Why This Matters
 1. **Human Review:** Developer reviews the contract before implementation
 2. **Testability:** Protocol enables easy mocking
 3. **Flexibility:** Implementation can change without breaking dependents
 4. **Clarity:** Forces explicit definition of capabilities
-
-### Example Flow
-
-```swift
-// STEP 1: Show this first and wait
-// Domain/AuthService.swift
-protocol AuthService: Sendable {
-    func login(email: String, password: String) async throws(AuthError) -> User
-    func logout() async throws(AuthError)
-}
-
-enum AuthError: Error {
-    case invalidCredentials
-    case networkFailure
-}
-```
-
-```swift
-// STEP 2: Only after approval
-// Data/FirebaseAuthService.swift
-struct FirebaseAuthService: AuthService {
-    func login(email: String, password: String) async throws(AuthError) -> User {
-        // Implementation
-    }
-}
-```
-
-```swift
-// Presentation/LoginViewModel.swift
-@MainActor
-@Observable
-final class LoginViewModel {
-    private let authService: any AuthService  // Injected
-    
-    init(authService: any AuthService) {
-        self.authService = authService
-    }
-}
-```
 
 ### Exceptions
 - Pure value types (no I/O)
