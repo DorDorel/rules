@@ -1,6 +1,6 @@
 # iOS Project Rules — SwiftUI, Intents & Architecture
 
-> For Claude Code: Be strict at boundaries. Pragmatic everywhere else.
+
 
 ---
 
