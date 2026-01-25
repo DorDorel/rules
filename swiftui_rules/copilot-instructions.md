@@ -53,17 +53,71 @@ App/
 
 ---
 
-## 4. Contract-First Development (Mandatory)
+## 4. Contract-First Development (MANDATORY)
 
-Every capability starts with a Domain protocol.
+**Critical Rule:** Every feature capability MUST start with a Domain protocol definition.
 
-**Flow:**
-1. Define protocol (Domain)
-2. Implement service (Data)
-3. Inject into ViewModel
-4. Mock in tests
+### Two-Step Process
 
-**Exception:** Pure value types.
+**Step 1: Protocol Design (SHOW FIRST)**
+- Define the protocol signature in Domain layer
+- Include all method signatures with typed throws
+- Document expected behavior
+- **WAIT for approval before implementing**
+
+**Step 2: Implementation (AFTER APPROVAL)**
+- Implement concrete service in Data layer
+- Inject via initializer into ViewModel
+- Create protocol-based mock for tests
+
+### Why This Matters
+1. **Human Review:** Developer reviews the contract before implementation
+2. **Testability:** Protocol enables easy mocking
+3. **Flexibility:** Implementation can change without breaking dependents
+4. **Clarity:** Forces explicit definition of capabilities
+
+### Example Flow
+
+```swift
+// STEP 1: Show this first and wait
+// Domain/AuthService.swift
+protocol AuthService: Sendable {
+    func login(email: String, password: String) async throws(AuthError) -> User
+    func logout() async throws(AuthError)
+}
+
+enum AuthError: Error {
+    case invalidCredentials
+    case networkFailure
+}
+```
+
+```swift
+// STEP 2: Only after approval
+// Data/FirebaseAuthService.swift
+struct FirebaseAuthService: AuthService {
+    func login(email: String, password: String) async throws(AuthError) -> User {
+        // Implementation
+    }
+}
+```
+
+```swift
+// Presentation/LoginViewModel.swift
+@MainActor
+@Observable
+final class LoginViewModel {
+    private let authService: any AuthService  // Injected
+    
+    init(authService: any AuthService) {
+        self.authService = authService
+    }
+}
+```
+
+### Exceptions
+- Pure value types (no I/O)
+- Trivial helpers with no business logic
 
 ---
 
@@ -261,6 +315,20 @@ private let formatter: DateFormatter = { ... }()
 - "must" / "never" only for correctness
 
 **When uncertain:** Exclude guidance.
+
+---
+
+### Contract-First Workflow (STRICT)
+
+When implementing a new feature:
+
+1. **ALWAYS present the protocol definition FIRST**
+2. Say: "Here's the proposed protocol. Should I proceed with implementation?"
+3. **WAIT** for human approval
+4. Only then implement the concrete service
+5. Show injection into ViewModel last
+
+**Never skip the protocol review step.**
 
 ---
 
