@@ -1,5 +1,7 @@
 # iOS Project Rules — SwiftUI, Intents & Architecture
 
+> For Claude Code: Be strict at boundaries. Pragmatic everywhere else.
+
 ---
 
 ## 1. Role & Persona
@@ -124,12 +126,45 @@ protocol PaymentService {
 - `@Observable` for ViewModels
 - No `ObservableObject`
 
-### Property Wrappers
-| Wrapper | Use |
-|---------|-----|
-| `@State` | View owns state |
-| `@Binding` | Child mutates parent |
-| `@Bindable` | Bindings to `@Observable` |
+### Property Wrappers (Critical Rules)
+
+| Wrapper | Use When | Example |
+|---------|----------|---------|
+| `@State` | View **owns** the state | `@State private var count = 0` |
+| `@Binding` | Child mutates parent state | `@Binding var isOn: Bool` |
+| `@Bindable` | Need bindings to injected `@Observable` | `@Bindable var viewModel: VM` |
+| `let` | Read-only injected value | `let viewModel: VM` |
+
+**CRITICAL:** Never mark injected or passed-in values as `@State`
+
+```swift
+// ❌ WRONG - State wrapper on injected dependency
+struct ProfileView: View {
+    @State private var viewModel: ProfileViewModel
+    
+    init(viewModel: ProfileViewModel) {
+        self._viewModel = State(initialValue: viewModel)  // NO!
+    }
+}
+
+// ✅ CORRECT - Let for read-only
+struct ProfileView: View {
+    let viewModel: ProfileViewModel
+}
+
+// ✅ CORRECT - Bindable when you need two-way binding
+struct ProfileView: View {
+    @Bindable var viewModel: ProfileViewModel
+}
+```
+
+**Why this matters:**
+- `@State` means "this view owns and manages this value"
+- Injected dependencies are owned by the parent
+- Wrapping injection in `@State` creates lifecycle confusion
+- Can cause retain cycles and testing issues
+
+**Rule of thumb:** If it comes through `init()`, it's NOT `@State`
 
 ### ViewState
 - Use `enum State` for async/exclusive phases
@@ -176,23 +211,86 @@ protocol PaymentService {
 
 ---
 
-## 8. Network Layer (Mandatory Pattern)
+## 8. Network Layer (Conditional)
 
-Never call `URLSession.shared.data()` directly.
+**When to use centralized NetworkManager:**
+- Multiple features make network calls
+- Shared authentication/headers needed
+- Consistent error handling across app
+- Complex request/response pipeline
+
+**When URLSession.shared is acceptable:**
+- Simple AppIntents with one-off requests
+- Prototype/testing code
+- Single isolated network call with no shared config
+
+### Centralized Pattern (Multi-Feature Apps)
+
+Never call `URLSession.shared.data()` directly in feature code.
 
 **Required:**
 ```swift
 actor NetworkManager {
+    static let shared = NetworkManager()
+    
     func fetch<T: Decodable>(url: URL) async throws(NetworkError) -> T {
-        // Centralized decoding + error handling
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw NetworkError.serverError
+        }
+        
+        return try JSONDecoder().decode(T.self, from: data)
     }
+}
+
+enum NetworkError: Error {
+    case serverError
+    case decodingFailed
+    case unauthorized
 }
 ```
 
 **Benefits:**
-- Single decoder config
+- Single decoder configuration
 - Consistent error mapping
-- Auth header injection
+- Auth header injection point
+- Request/response logging
+
+### Simple Pattern (AppIntents, Prototypes)
+
+Direct URLSession is acceptable when:
+- No shared configuration needed
+- One-off operation
+- No cross-feature consistency required
+
+```swift
+struct FetchDataIntent: AppIntent {
+    func perform() async throws -> String {
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+```
+
+### Migration Trigger
+
+**Introduce NetworkManager when:**
+- 3+ network call sites exist
+- Need shared headers (auth tokens)
+- Same decoder config repeated
+- Error handling duplicated
+
+**Refactoring is straightforward:**
+```swift
+// Before: Scattered calls
+let (data, _) = try await URLSession.shared.data(from: url)
+let result = try JSONDecoder().decode(T.self, from: data)
+
+// After: Centralized
+let result: T = try await NetworkManager.shared.fetch(url: url)
+```
 
 ---
 
@@ -289,14 +387,48 @@ private let formatter: DateFormatter = { ... }()
 
 ---
 
-## 15. Anti-Patterns (Forbidden)
+## 15. Anti-Patterns (FORBIDDEN)
 
-- Boolean state hell (`isLoading`, `isError` separately)
-- Logic in View `body`
-- Force unwrap (except tests)
-- `@Published` with Observation
-- Stateful services as classes
-- Parsing `response.output` with `@Generable`
+These patterns are **strictly forbidden** and will cause issues:
+
+### State Management
+- ❌ **Boolean state hell:** Separate `isLoading`, `isError`, `isSuccess` flags
+  - ✅ Use: `enum State { case loading, success, error }`
+- ❌ **@State on injected values:** `@State private var viewModel: VM` in init
+  - ✅ Use: `let viewModel: VM` or `@Bindable var viewModel: VM`
+- ❌ **@Published with Observation:** Mixing old and new frameworks
+  - ✅ Use: `@Observable` only
+
+### Architecture
+- ❌ **Logic in View body:** Business logic inside SwiftUI views
+  - ✅ Use: ViewModel methods
+- ❌ **Direct service instantiation:** `let service = MyService()` in ViewModel
+  - ✅ Use: Protocol injection via `init(service: ServiceProtocol)`
+- ❌ **Stateful service classes:** Services as classes with stored properties
+  - ✅ Use: `struct` services (stateless and Sendable)
+
+### Concurrency
+- ❌ **Force unwrap:** `value!` outside test code
+  - ✅ Use: `guard let`, `if let`, or `??`
+- ❌ **Parsing AI output:** `response.output` with `@Generable`
+  - ✅ Use: `response.content` for structured data
+
+### Common Mistakes
+```swift
+// ❌ WRONG
+struct MyView: View {
+    @State private var viewModel: MyViewModel
+    
+    init(viewModel: MyViewModel) {
+        _viewModel = State(initialValue: viewModel)  // Creates copy!
+    }
+}
+
+// ✅ CORRECT
+struct MyView: View {
+    let viewModel: MyViewModel  // Reference to injected instance
+}
+```
 
 ---
 
