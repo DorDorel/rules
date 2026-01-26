@@ -1,0 +1,41 @@
+# --- Python & Automation ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.manifest
+spec/
+build/
+dist/
+venv/
+.venv/
+env/
+.env
+
+# --- Local Configuration ---
+projects.json
+*.log
+
+# --- macOS System Files ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Windows System Files ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- IDE & Editors ---
+# VS Code / Cursor
+.vscode/
+*.code-workspace
+
+# JetBrains (Android Studio / IntelliJ / PyCharm)
+.idea/
+*.iml
+*.iws
+
+# Xcode (Just in case you open this folder in Xcode)
+*.xcworkspace
+xcuserdata/
