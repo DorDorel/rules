@@ -4,70 +4,85 @@ import argparse
 from pathlib import Path
 
 TARGET_FILES = [
-    "CLAUDE.md",                      
-    "GEMINI.md",                    
+    "CLAUDE.md",
+    "GEMINI.md",
     "AGENT.md",
-    ".github/copilot-instructions.md",
-    ".cursorrules"
+    ".cursorrules",
+    ".github/copilot-instructions.md"
 ]
 
-def sync_rules(tech_name, target_project_path):
+SKILLS_DEST_DIR = ".prompts/skills"
 
-    base_rules_path = Path(__file__).parent
+def get_rule_content(tech_path):
+    rule_path = tech_path / "core.md"
+    if not rule_path.exists():
+        print(f"Error: Could not find core.md in {tech_path}")
+        return None
+    with open(rule_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+def sync_skills(source_tech_path, target_project_path):
+    source_skills = source_tech_path / "skills"
+    target_skills = target_project_path / SKILLS_DEST_DIR
     
+    available_skills = []
 
-    source_file = base_rules_path / f"{tech_name}_rules" / "core.md"
+    if not source_skills.exists():
+        return []
+
+    if target_skills.exists():
+        shutil.rmtree(target_skills)
     
-    if not source_file.exists():
-        print(f" Error: Source file not found: {source_file}")
-        print(f"   Make sure you have a folder named '{tech_name}_rules' with a 'core.md' file inside.")
-        return
+    target_skills.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_skills, target_skills)
 
-    target_path = Path(target_project_path)
-    if not target_path.exists():
-        print(f" Error: Target project path does not exist: {target_path}")
-        return
+    for file in source_skills.iterdir():
+        if file.is_file() and not file.name.startswith('.'):
+            available_skills.append(file.name)
+            
+    return available_skills
 
-    print(f" Syncing rules for [{tech_name}] to project: {target_path.name}...")
+def generate_skills_footer(skills_list):
+    if not skills_list:
+        return ""
     
-
-    try:
-        with open(source_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except Exception as e:
-        print(f" Error reading source file: {e}")
-        return
-
-
-    success_count = 0
-    for relative_dest in TARGET_FILES:
-        dest_full_path = target_path / relative_dest
+    clean_path = SKILLS_DEST_DIR.replace("\\", "/")
+    
+    footer = "\n\n---\n\n## Available Skills & Tools\n"
+    footer += f"You have access to specialized skills in the `{clean_path}/` directory.\n"
+    footer += "Read the corresponding file if the user asks for these tasks:\n\n"
+    
+    for skill in skills_list:
+        footer += f"- **{skill}**: Read `{clean_path}/{skill}`\n"
         
-        try:
-
-            dest_full_path.parent.mkdir(parents=True, exist_ok=True)
-            
-
-            with open(dest_full_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            print(f"  Created: {relative_dest}")
-            success_count += 1
-            
-        except Exception as e:
-            print(f"  Failed to create {relative_dest}: {e}")
-
-    print(f"\n Done! Synced {success_count} files.")
+    return footer
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Sync AI Agent rules to a project.")
-    
-
-    parser.add_argument("tech", help="The technology name (e.g., flutter, nestjs, swiftui)")
-    
-
-    parser.add_argument("target", help="The path to the target project directory")
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("tech")
+    parser.add_argument("target", nargs="?", default=".")
     args = parser.parse_args()
+
+    base_path = Path(__file__).parent
+    tech_path = base_path / f"{args.tech}_rules"
+    target_path = Path(args.target).expanduser().resolve()
+
+    print(f"Syncing {args.tech} to {target_path.name}")
+
+    content = get_rule_content(tech_path)
     
-    sync_rules(args.tech, args.target)
+    if content:
+        skills_found = sync_skills(tech_path, target_path)
+        final_content = content + generate_skills_footer(skills_found)
+
+        for relative_dest in TARGET_FILES:
+            dest_full_path = target_path / relative_dest
+            try:
+                dest_full_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest_full_path, 'w', encoding='utf-8') as f:
+                    f.write(final_content)
+                print(f"Wrote: {relative_dest}")
+            except Exception as e:
+                print(f"Failed: {relative_dest} - {e}")
+        
+        print("Done.")
