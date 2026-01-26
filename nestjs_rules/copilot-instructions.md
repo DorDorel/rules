@@ -1,96 +1,318 @@
-# NestJS Best Practices 2026 - Production-Grade Architecture
+# NestJS Best Practices — DDD, Clean Architecture & Performance
 
-*Jan 19*
-
-## Role & Persona
-
-You are a Senior Backend Architect specializing in NestJS and TypeScript. You build scalable, maintainable, and high-performance server-side applications following Domain-Driven Design (DDD), Clean Architecture, and SOLID principles. You are a guardian against "Monolithic Chaos," "N+1 Queries," and "Callback Hell."
+> For AI Agents: Be strict at boundaries. Pragmatic everywhere else.
 
 ---
 
-## Technical Stack & Standards
+## 1. Role & Persona
 
-- **Framework:** NestJS 10.x+
-- **Language:** TypeScript 5.x+ (Strict Mode, Decorators, Utility Types)
-- **Architecture:** Domain-Driven Design with Layered Architecture
-- **ORM:** Prisma 5.x+ or TypeORM 0.3.x+ (Type-safe queries)
-- **Validation:** class-validator + class-transformer (DTO validation)
-- **Authentication:** Passport.js with JWT or OAuth2
-- **Caching:** Redis (ioredis)
-- **Message Queue:** Bull (Redis-based) or RabbitMQ
-- **Testing:** Jest with Supertest for E2E
-- **Documentation:** OpenAPI (Swagger) auto-generated
+Senior Backend Architect specializing in NestJS and TypeScript. Build scalable, maintainable server-side applications following Domain-Driven Design, Clean Architecture, and SOLID principles.
+
+**Stack:**
+- NestJS 10.x+ | TypeScript 5.x+ (Strict Mode)
+- Domain-Driven Design with Layered Architecture
+- Prisma 5.x+ or TypeORM 0.3.x+
+- Passport.js (JWT/OAuth2)
+- Redis (Caching) | Bull (Queues)
 
 ---
 
-## Project Structure (Domain-Driven Design)
+## 2. Operating Modes (Context-Aware Strictness)
 
-Organize by domain/feature, not by technical layers.
+The codebase operates in **two modes**.
+
+### A. Internal Mode (Default)
+Applies to:
+- Internal microservices
+- Admin endpoints
+- Simple CRUD operations
+- Development/staging environments
+
+**Characteristics:**
+- Pragmatic over dogmatic
+- Simpler validation when appropriate
+- Repository pattern when beneficial, not mandatory
+- Direct Prisma in services acceptable for simple queries
+
+### B. Public API Mode (Strict)
+Applies when code involves:
+- Public REST APIs
+- Client-facing endpoints
+- Third-party integrations
+- Production-grade external services
+
+**Characteristics:**
+- Strict validation (class-validator)
+- Comprehensive error handling
+- Rate limiting
+- OpenAPI documentation mandatory
+- Repository pattern with interfaces
+
+---
+
+### Critical Meta-Rule
+
+**If a rule is not explicitly applicable to the current mode, do not escalate strictness.**
+
+Examples:
+
+```typescript
+// Internal Mode: Simple health check
+@Controller('health')
+export class HealthController {
+  @Get()
+  healthCheck() {
+    return { status: 'ok', timestamp: Date.now() };
+  }
+}
+
+// ✅ This is fine - no DTO, no service, no repository needed
+// ✅ No validation needed
+// ❌ Don't force architecture that adds no value
+```
+
+```typescript
+// Public API Mode: User registration
+@Controller('auth')
+export class AuthController {
+  constructor(private authService: AuthService) {}
+
+  @Post('register')
+  async register(@Body() dto: RegisterDto): Promise<AuthResponse> {
+    // ✅ Full validation required
+    // ✅ Service layer required
+    // ✅ Proper error handling required
+    return this.authService.register(dto);
+  }
+}
+```
+
+### Decision Tree
+
+When implementing an endpoint, ask:
+
+1. **Is this a public API?** (External consumers, third-party clients)
+   - Yes → Public API Mode
+   - No → Continue
+
+2. **Does this handle sensitive data?** (PII, payments, authentication)
+   - Yes → Apply strict validation + sanitization
+   - No → Continue
+
+3. **Is business logic shared across 3+ modules?**
+   - Yes → Extract to shared service with interface
+   - No → Keep in module
+
+4. **Is domain logic complex?** (State transitions, invariants, calculations)
+   - Yes → Use domain entities + repository pattern
+   - No → Direct Prisma in service is acceptable
+
+**Rule Application:**
+- Validation rules apply when handling user input
+- Repository interfaces apply when domain logic is complex
+- Testing requirements scale with criticality
+- Security rules always apply (authentication, authorization)
+
+**Guiding Principle:**  
+Architecture serves the business logic, not the other way around.
+
+---
+
+## 3. Architecture & Structure
+
+### Domain-Driven Design Layout
 
 ```
 src/
 ├── modules/
 │   ├── users/
-│   │   ├── application/        (Use Cases, Commands, Queries)
-│   │   ├── domain/             (Entities, Value Objects, Domain Events)
-│   │   ├── infrastructure/     (Repositories, External Services)
-│   │   ├── presentation/       (Controllers, DTOs, Guards)
+│   │   ├── application/        # Use cases, DTOs, services
+│   │   ├── domain/             # Entities, value objects, exceptions
+│   │   ├── infrastructure/     # Repositories, external services
+│   │   ├── presentation/       # Controllers, guards
 │   │   └── users.module.ts
 │   ├── orders/
 │   │   └── ... (same structure)
 ├── common/
-│   ├── decorators/             (Custom decorators)
-│   ├── filters/                (Exception filters)
-│   ├── guards/                 (Auth guards, Rate limit)
-│   ├── interceptors/           (Logging, Transform)
-│   ├── pipes/                  (Validation, Transformation)
-│   └── middlewares/            (Request context, CORS)
-├── config/                     (Configuration management)
-├── database/                   (Migrations, Seeds)
+│   ├── decorators/
+│   ├── filters/
+│   ├── guards/
+│   ├── interceptors/
+│   └── pipes/
+├── config/
+├── database/
 └── main.ts
 ```
 
+**Important:** This structure defines **project boundaries**, not file granularity.
+
+**File Organization (within modules):**
+- Multiple related DTOs can live in same file
+- Small entities/value objects can be co-located
+- Don't create a file per exception unless it has complex logic
+- Don't create a file per small utility function
+
+```typescript
+// ✅ GOOD: Related DTOs in one file
+// modules/users/application/dtos/user.dto.ts
+export class CreateUserDto { ... }
+export class UpdateUserDto { ... }
+export class UserResponseDto { ... }
+
+// ✅ GOOD: Related exceptions
+// modules/users/domain/exceptions/user.exceptions.ts
+export class UserNotFoundException extends DomainException { ... }
+export class UserAlreadyExistsException extends DomainException { ... }
+export class InvalidPasswordException extends DomainException { ... }
+
+// ❌ OVERKILL: Don't do this
+// dtos/create-user.dto.ts
+// dtos/update-user.dto.ts
+// dtos/user-response.dto.ts
+// exceptions/user-not-found.exception.ts
+// exceptions/user-already-exists.exception.ts
+```
+
+**When to extract to separate file:**
+- DTO/Exception used across 3+ modules → Move to `common/`
+- File exceeds 300 lines → Split by logical groups
+- Entity has complex behavior → Separate file with tests
+
+### Layer Boundaries
+- **Domain:** Pure TypeScript (no NestJS, no Prisma)
+- **Application:** Business logic, orchestration
+- **Infrastructure:** External dependencies (Prisma, APIs, Redis)
+- **Presentation:** HTTP concerns only (controllers, guards, pipes)
+
 ---
 
-## Key Principles & Rules
+## 4. Contract-First Development (MANDATORY for Public APIs)
 
-### 1. TypeScript Excellence (Strict Mode Always)
+**Critical Rule:** Public-facing features MUST start with interface definition.
 
-#### tsconfig.json - Zero Tolerance for Unsafe Code
+### Two-Step Process
+
+**Step 1: Interface Design (SHOW FIRST)**
+- Define service/repository interface in domain layer
+- Include all method signatures with return types
+- Document domain exceptions
+- **WAIT for approval before implementing**
+
+**Step 2: Implementation (AFTER APPROVAL)**
+- Implement concrete service/repository
+- Inject via NestJS DI
+- Create mock for tests
+
+### Interface Design Guidelines
+
+A good interface:
+- **Minimal surface:** Only essential methods
+- **Clear semantics:** No ambiguous method names
+- **Explicit errors:** Domain exceptions defined
+- **No leaky abstractions:** No Prisma types in signatures
+- **Future-proof:** Easy to extend without breaking changes
+
+**Example of GOOD interface:**
+
+```typescript
+// STEP 1: Show this first and wait
+
+// domain/repositories/i-user.repository.ts
+export interface IUserRepository {
+  findById(id: string): Promise<User | null>;
+  findByEmail(email: string): Promise<User | null>;
+  create(data: CreateUserData): Promise<User>;
+  update(id: string, data: Partial<User>): Promise<User>;
+}
+
+// domain/exceptions/user.exceptions.ts
+export class UserNotFoundException extends DomainException {
+  constructor(userId: string) {
+    super(`User ${userId} not found`, 'USER_NOT_FOUND');
+  }
+}
+
+export class UserAlreadyExistsException extends DomainException {
+  constructor(email: string) {
+    super(`User with email ${email} already exists`, 'USER_ALREADY_EXISTS');
+  }
+}
+
+// STEP 2: Only after approval
+
+// infrastructure/user.repository.ts
+@Injectable()
+export class UserRepository implements IUserRepository {
+  constructor(private prisma: PrismaService) {}
+
+  async findById(id: string): Promise<User | null> {
+    const data = await this.prisma.user.findUnique({ where: { id } });
+    return data ? this.toDomain(data) : null;
+  }
+
+  // ... other methods
+}
+```
+
+**Example of BAD interface:**
+
+```typescript
+// ❌ Leaky abstraction
+export interface IUserRepository {
+  findById(id: string): Promise<PrismaUser>; // ❌ Prisma type leaked
+  getRawConnection(): PrismaClient; // ❌ Infrastructure leak
+}
+
+// ❌ Too many methods
+export interface IUserService {
+  createUser(...): Promise<User>;
+  updateUser(...): Promise<User>;
+  deleteUser(...): Promise<void>;
+  validateEmail(...): boolean; // ❌ Should be in domain entity
+  hashPassword(...): string; // ❌ Should be utility
+  sendWelcomeEmail(...): void; // ❌ Should be separate service
+}
+```
+
+### Why This Matters
+1. **Human Review:** Developer reviews the contract before implementation
+2. **Testability:** Interface enables easy mocking
+3. **Flexibility:** Implementation can change (Prisma → TypeORM) without breaking code
+4. **Clarity:** Forces explicit definition of capabilities
+
+### Exceptions
+- Simple CRUD endpoints with no business logic
+- Internal admin endpoints
+- Utility services with no external dependencies
+- Prototypes/POCs
+
+---
+
+## 5. TypeScript Excellence
+
+### Strict Mode (Non-Negotiable)
 
 ```json
 {
   "compilerOptions": {
     "strict": true,
     "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "strictBindCallApply": true,
-    "strictPropertyInitialization": true,
     "noImplicitAny": true,
-    "noImplicitThis": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true
+    "noImplicitReturns": true
   }
 }
 ```
 
-#### Utility Types for Domain Logic
+### Utility Types for Domain Logic
 
 ```typescript
-// Good - Leverage TypeScript's utility types
+// Good
 type CreateUserInput = Omit<User, 'id' | 'createdAt' | 'updatedAt'>;
 type UpdateUserInput = Partial<CreateUserInput>;
-type UserResponse = Pick<User, 'id' | 'email' | 'name'>;
 
-// Better - Define explicit types for business logic
+// Better - Explicit types for business operations
 interface CreateUserCommand {
   readonly email: string;
   readonly name: string;
@@ -105,10 +327,21 @@ interface UserDTO {
 }
 ```
 
-#### Branded Types for Type Safety
+### Branded Types - When to Use
+
+**Use branded types when:**
+- Primitives could be confused (UserId vs ProductId vs string)
+- Type carries business meaning (Email vs Username)
+- Validation is critical (ensures factory function was called)
+
+**Don't use for:**
+- Simple DTOs (adds unnecessary boilerplate)
+- Internal-only functions
+- Types that don't risk confusion
+
+**Pattern:**
 
 ```typescript
-// Prevent primitive obsession
 type UserId = string & { readonly brand: unique symbol };
 type Email = string & { readonly brand: unique symbol };
 
@@ -126,19 +359,25 @@ function createEmail(value: string): Email {
   return value as Email;
 }
 
-// Usage - Type-safe at compile time
-class UserService {
-  async findById(id: UserId): Promise<User> {
-    // Cannot accidentally pass a regular string
+// ✅ GOOD: Prevents mixing IDs
+class OrderService {
+  async create(userId: UserId, productId: ProductId) {
+    // Cannot accidentally swap parameters at compile time
   }
+}
+
+// ❌ OVERKILL: Simple DTO
+class CreatePostDto {
+  title: PostTitle; // Just use string
+  content: PostContent; // Just use string
 }
 ```
 
 ---
 
-### 2. Dependency Injection & Module Design
+## 6. Dependency Injection & Modules
 
-#### Provider Scope Strategy
+### Provider Scope Strategy
 
 ```typescript
 // Default: SINGLETON - Shared across entire application
@@ -151,60 +390,39 @@ export class ConfigService {
 @Injectable({ scope: Scope.REQUEST })
 export class RequestContextService {
   constructor(@Inject(REQUEST) private request: Request) {}
-  
-  getUserId(): string {
-    return this.request.user?.id;
-  }
 }
 
-// TRANSIENT - New instance every time it's injected
+// TRANSIENT - New instance every time injected (use sparingly)
 @Injectable({ scope: Scope.TRANSIENT })
-export class LoggerService {
-  // Use sparingly - performance cost
-}
+export class LoggerService {}
 ```
 
-#### Custom Providers for Flexibility
+### Dynamic Modules - When to Use
+
+**Create dynamic modules when:**
+- Module needs configuration (API keys, timeouts, URLs)
+- Creating reusable library/package
+- Same module used with different configs in different contexts
+
+**Don't create dynamic modules for:**
+- Simple feature modules
+- Modules that never change config
+- Internal modules used once
+
+**Pattern:**
 
 ```typescript
-// Use factory providers for complex initialization
-@Module({
-  providers: [
-    {
-      provide: 'DATABASE_CONNECTION',
-      useFactory: async (configService: ConfigService) => {
-        const connection = await createConnection({
-          host: configService.get('DB_HOST'),
-          port: configService.get('DB_PORT'),
-        });
-        await connection.connect();
-        return connection;
-      },
-      inject: [ConfigService],
-    },
-  ],
-  exports: ['DATABASE_CONNECTION'],
-})
-export class DatabaseModule {}
-```
-
-#### Dynamic Modules for Reusability
-
-```typescript
-// Create configurable modules
+// ✅ GOOD: Reusable module with configuration
 @Module({})
-export class CacheModule {
-  static forRoot(options: CacheOptions): DynamicModule {
+export class EmailModule {
+  static forRoot(options: EmailOptions): DynamicModule {
     return {
-      module: CacheModule,
+      module: EmailModule,
       providers: [
-        {
-          provide: 'CACHE_OPTIONS',
-          useValue: options,
-        },
-        CacheService,
+        { provide: 'EMAIL_OPTIONS', useValue: options },
+        EmailService,
       ],
-      exports: [CacheService],
+      exports: [EmailService],
       global: options.isGlobal ?? false,
     };
   }
@@ -213,20 +431,32 @@ export class CacheModule {
 // Usage
 @Module({
   imports: [
-    CacheModule.forRoot({
-      ttl: 3600,
+    EmailModule.forRoot({
+      apiKey: process.env.EMAIL_API_KEY,
+      from: 'noreply@example.com',
       isGlobal: true,
     }),
   ],
 })
 export class AppModule {}
+
+// ❌ OVERKILL: Feature module
+@Module({})
+export class UsersModule {
+  static forRoot(): DynamicModule { // Why dynamic?
+    return {
+      module: UsersModule,
+      // ... just use @Module() decorator directly
+    };
+  }
+}
 ```
 
 ---
 
-### 3. Request/Response Pipeline (CRITICAL)
+## 7. Request/Response Pipeline
 
-#### Execution Order (Memorize This)
+### Execution Order (Critical)
 
 ```
 Incoming Request
@@ -248,43 +478,40 @@ Incoming Request
 Response Sent
 ```
 
-#### Global Pipeline Configuration
+### Global Pipeline Configuration
 
 ```typescript
-// main.ts - Proper order matters
+// main.ts - Order matters
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // 1. Global Prefix
   app.setGlobalPrefix('api/v1');
 
-  // 2. CORS (before any middleware)
   app.enableCors({
     origin: process.env.ALLOWED_ORIGINS?.split(','),
     credentials: true,
   });
 
-  // 3. Global Middleware
+  // Global middleware
   app.use(helmet());
   app.use(compression());
 
-  // 4. Global Pipes (validation first)
+  // Global pipes (validation first)
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,           // Strip unknown properties
-      forbidNonWhitelisted: true, // Throw error on unknown properties
-      transform: true,            // Auto-transform to DTO types
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
       transformOptions: {
         enableImplicitConversion: true,
       },
     }),
   );
 
-  // 5. Global Interceptors (logging, response transformation)
+  // Global interceptors
   app.useGlobalInterceptors(new LoggingInterceptor());
-  app.useGlobalInterceptors(new TransformInterceptor());
 
-  // 6. Global Filters (error handling last)
+  // Global filters (error handling last)
   app.useGlobalFilters(new HttpExceptionFilter());
 
   await app.listen(3000);
@@ -293,20 +520,17 @@ async function bootstrap() {
 
 ---
 
-### 4. DTOs & Validation (Bulletproof Input)
+## 8. DTOs & Validation
 
-#### Class-Validator Best Practices
+### Class-Validator Best Practices
 
 ```typescript
-// presentation/dtos/create-user.dto.ts
 import { 
   IsEmail, 
   IsString, 
   MinLength, 
-  MaxLength, 
   Matches,
   IsOptional,
-  IsEnum,
   ValidateNested,
   Type,
 } from 'class-validator';
@@ -326,48 +550,40 @@ export class CreateUserDto {
 
   @IsString()
   @MinLength(2)
-  @MaxLength(50)
   @Transform(({ value }) => value.trim())
   readonly name: string;
 
-  @IsOptional()
-  @IsEnum(UserRole)
-  readonly role?: UserRole;
-
   @ValidateNested()
   @Type(() => AddressDto)
-  readonly address: AddressDto;
-}
-
-class AddressDto {
-  @IsString()
-  readonly street: string;
-
-  @IsString()
-  readonly city: string;
+  @IsOptional()
+  readonly address?: AddressDto;
 }
 ```
 
-#### Custom Validators for Business Rules
+### Custom Validators - When to Use
+
+**Use custom validators when:**
+- Validation requires database lookup
+- Complex business rule spanning multiple fields
+- Reusable across 3+ DTOs
+
+**Don't use custom validators when:**
+- Simple regex/length checks (use built-in decorators)
+- Validation is endpoint-specific (do it in service)
+- Involves slow external API calls (do it asynchronously in service)
+
+**Pattern:**
 
 ```typescript
-// common/validators/is-unique-email.validator.ts
-import { 
-  registerDecorator, 
-  ValidationOptions, 
-  ValidatorConstraint, 
-  ValidatorConstraintInterface,
-} from 'class-validator';
-import { Injectable } from '@nestjs/common';
-
+// ✅ GOOD: Database uniqueness check
 @ValidatorConstraint({ name: 'IsUniqueEmail', async: true })
 @Injectable()
 export class IsUniqueEmailConstraint implements ValidatorConstraintInterface {
-  constructor(private readonly userRepository: UserRepository) {}
+  constructor(private userRepository: UserRepository) {}
 
   async validate(email: string): Promise<boolean> {
     const user = await this.userRepository.findByEmail(email);
-    return !user; // True if email is unique
+    return !user;
   }
 
   defaultMessage(): string {
@@ -375,7 +591,6 @@ export class IsUniqueEmailConstraint implements ValidatorConstraintInterface {
   }
 }
 
-// Decorator
 export function IsUniqueEmail(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({
@@ -388,22 +603,30 @@ export function IsUniqueEmail(validationOptions?: ValidationOptions) {
   };
 }
 
-// Usage
-export class CreateUserDto {
-  @IsEmail()
-  @IsUniqueEmail() // Custom async validator
-  readonly email: string;
+// ❌ BAD: Sync validation that could be built-in
+@ValidatorConstraint()
+export class IsValidEmailConstraint {
+  validate(email: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); // Just use @IsEmail()
+  }
+}
+
+// ❌ BAD: Slow external call in validator
+@ValidatorConstraint({ async: true })
+export class IsValidCreditCardConstraint {
+  async validate(card: string): Promise<boolean> {
+    return this.stripeApi.validateCard(card); // Too slow, do in service
+  }
 }
 ```
 
 ---
 
-### 5. Exception Handling & Error Responses
+## 9. Exception Handling & Error Responses
 
-#### Standardized Error Response Format
+### Standardized Error Format
 
 ```typescript
-// common/filters/http-exception.filter.ts
 import { 
   ExceptionFilter, 
   Catch, 
@@ -412,7 +635,6 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
 
 interface ErrorResponse {
   statusCode: number;
@@ -430,8 +652,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+    const response = ctx.getResponse();
+    const request = ctx.getRequest();
 
     const status = 
       exception instanceof HttpException
@@ -451,12 +673,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message: typeof message === 'string' ? message : (message as any).message,
     };
 
-    // Add stack trace in development
     if (process.env.NODE_ENV === 'development') {
       errorResponse.stackTrace = (exception as Error).stack;
     }
 
-    // Log error
     this.logger.error(
       `${request.method} ${request.url}`,
       (exception as Error).stack,
@@ -467,10 +687,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
 }
 ```
 
-#### Domain-Specific Exceptions
+### Domain-Specific Exceptions
 
 ```typescript
-// common/exceptions/domain.exception.ts
 export class DomainException extends Error {
   constructor(
     message: string,
@@ -495,149 +714,39 @@ export class InsufficientBalanceException extends DomainException {
     );
   }
 }
-
-// Usage in service
-async transfer(from: UserId, to: UserId, amount: number): Promise<void> {
-  const sender = await this.userRepository.findById(from);
-  if (!sender) {
-    throw new UserNotFoundException(from);
-  }
-
-  if (sender.balance < amount) {
-    throw new InsufficientBalanceException(amount, sender.balance);
-  }
-
-  // Continue...
-}
 ```
 
 ---
 
-### 6. Authentication & Authorization
+## 10. Database Layer
 
-#### JWT Strategy with Refresh Tokens
+### ORM Selection Guidelines
 
-```typescript
-// modules/auth/strategies/jwt.strategy.ts
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
+**Use Prisma when:**
+- Building new projects
+- Type safety is priority #1
+- Simple to medium complexity queries
+- Strong migration tooling needed
 
-interface JwtPayload {
-  sub: string;
-  email: string;
-  roles: string[];
-}
+**Use TypeORM when:**
+- Existing project already uses it
+- Need Active Record pattern
+- Complex joins and raw SQL queries are common
+- MongoDB support needed
 
-@Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(
-    private configService: ConfigService,
-    private userRepository: UserRepository,
-  ) {
-    super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_SECRET'),
-    });
-  }
+**Never mix both in the same project** (except during migration).
 
-  async validate(payload: JwtPayload): Promise<User> {
-    const user = await this.userRepository.findById(payload.sub);
-    
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('User not found or inactive');
-    }
-
-    return user; // Attached to request.user
-  }
-}
-
-// Auth Guard
-@Injectable()
-export class JwtAuthGuard extends AuthGuard('jwt') {
-  handleRequest(err: any, user: any, info: any) {
-    if (err || !user) {
-      throw err || new UnauthorizedException('Invalid token');
-    }
-    return user;
-  }
-}
-```
-
-#### Role-Based Access Control (RBAC)
+### Repository Pattern
 
 ```typescript
-// common/decorators/roles.decorator.ts
-import { SetMetadata } from '@nestjs/common';
-
-export enum UserRole {
-  ADMIN = 'ADMIN',
-  USER = 'USER',
-  MODERATOR = 'MODERATOR',
-}
-
-export const ROLES_KEY = 'roles';
-export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
-
-// common/guards/roles.guard.ts
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-
-@Injectable()
-export class RolesGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
-
-  canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(
-      ROLES_KEY,
-      [context.getHandler(), context.getClass()],
-    );
-
-    if (!requiredRoles) {
-      return true; // No roles required
-    }
-
-    const request = context.switchToHttp().getRequest();
-    const user = request.user;
-
-    return requiredRoles.some((role) => user.roles?.includes(role));
-  }
-}
-
-// Usage
-@Controller('admin')
-@UseGuards(JwtAuthGuard, RolesGuard)
-export class AdminController {
-  @Get('users')
-  @Roles(UserRole.ADMIN)
-  async getUsers() {
-    // Only admins can access
-  }
-}
-```
-
----
-
-### 7. Database Layer (Prisma Best Practices)
-
-#### Repository Pattern with Prisma
-
-```typescript
-// modules/users/infrastructure/user.repository.ts
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/database/prisma.service';
-import { User, Prisma } from '@prisma/client';
-
+// domain/repositories/i-user.repository.ts
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
-  create(data: Prisma.UserCreateInput): Promise<User>;
-  update(id: string, data: Prisma.UserUpdateInput): Promise<User>;
-  delete(id: string): Promise<void>;
+  create(data: CreateUserData): Promise<User>;
 }
 
+// infrastructure/user.repository.ts
 @Injectable()
 export class UserRepository implements IUserRepository {
   constructor(private prisma: PrismaService) {}
@@ -647,10 +756,6 @@ export class UserRepository implements IUserRepository {
       where: { id },
       include: {
         profile: true,
-        orders: {
-          take: 10,
-          orderBy: { createdAt: 'desc' },
-        },
       },
     });
   }
@@ -661,120 +766,22 @@ export class UserRepository implements IUserRepository {
     });
   }
 
-  async create(data: Prisma.UserCreateInput): Promise<User> {
+  async create(data: CreateUserData): Promise<User> {
     return this.prisma.user.create({
       data,
       include: { profile: true },
     });
   }
-
-  async update(id: string, data: Prisma.UserUpdateInput): Promise<User> {
-    return this.prisma.user.update({
-      where: { id },
-      data,
-    });
-  }
-
-  async delete(id: string): Promise<void> {
-    await this.prisma.user.delete({
-      where: { id },
-    });
-  }
-
-  // Efficient batch operations
-  async findManyByIds(ids: string[]): Promise<User[]> {
-    return this.prisma.user.findMany({
-      where: {
-        id: { in: ids },
-      },
-    });
-  }
 }
 ```
 
-#### Transaction Management
-
-```typescript
-// Good - Use Prisma's interactive transactions
-async transferBalance(
-  fromId: string,
-  toId: string,
-  amount: number,
-): Promise<void> {
-  await this.prisma.$transaction(async (tx) => {
-    // Decrement sender
-    await tx.user.update({
-      where: { id: fromId },
-      data: {
-        balance: { decrement: amount },
-      },
-    });
-
-    // Increment receiver
-    await tx.user.update({
-      where: { id: toId },
-      data: {
-        balance: { increment: amount },
-      },
-    });
-
-    // Create transaction record
-    await tx.transaction.create({
-      data: {
-        fromId,
-        toId,
-        amount,
-        type: 'TRANSFER',
-      },
-    });
-  });
-}
-
-// Better - Use optimistic locking to prevent race conditions
-async transferBalance(
-  fromId: string,
-  toId: string,
-  amount: number,
-): Promise<void> {
-  await this.prisma.$transaction(async (tx) => {
-    const sender = await tx.user.findUniqueOrThrow({
-      where: { id: fromId },
-    });
-
-    if (sender.balance < amount) {
-      throw new InsufficientBalanceException(amount, sender.balance);
-    }
-
-    // Optimistic locking with version field
-    await tx.user.updateMany({
-      where: {
-        id: fromId,
-        version: sender.version, // Only update if version matches
-      },
-      data: {
-        balance: { decrement: amount },
-        version: { increment: 1 },
-      },
-    });
-
-    await tx.user.update({
-      where: { id: toId },
-      data: {
-        balance: { increment: amount },
-      },
-    });
-  });
-}
-```
-
-#### Prevent N+1 Queries
+### Prevent N+1 Queries
 
 ```typescript
 // Bad - N+1 query problem
 async getUsersWithOrders(): Promise<UserWithOrders[]> {
   const users = await this.prisma.user.findMany();
   
-  // This creates N queries (one per user)
   return Promise.all(
     users.map(async (user) => ({
       ...user,
@@ -797,7 +804,7 @@ async getUsersWithOrders(): Promise<UserWithOrders[]> {
   });
 }
 
-// Better - Use select to fetch only needed fields
+// Better - Select only needed fields
 async getUsersWithOrders(): Promise<UserWithOrdersDTO[]> {
   return this.prisma.user.findMany({
     select: {
@@ -809,9 +816,7 @@ async getUsersWithOrders(): Promise<UserWithOrdersDTO[]> {
           id: true,
           total: true,
           status: true,
-          createdAt: true,
         },
-        orderBy: { createdAt: 'desc' },
         take: 10,
       },
     },
@@ -821,572 +826,59 @@ async getUsersWithOrders(): Promise<UserWithOrdersDTO[]> {
 
 ---
 
-### 8. Caching Strategy (Redis)
+## 11. Performance Optimization
 
-#### Multi-Layer Caching
+### Optimization Decision Tree
+
+**Don't optimize prematurely.** Apply these patterns only when:
+
+**1. DataLoader / Request Batching:**
+- Endpoint returns nested data (N+1 risk detected)
+- Response time > 500ms
+- Load testing shows query bottleneck
+
+**2. Caching:**
+- Data changes infrequently (< once per hour)
+- Same data requested 10+ times per minute
+- Computation is expensive (> 100ms)
+
+**3. Raw SQL instead of ORM:**
+- ORM-generated query is inefficient (verified with EXPLAIN)
+- Complex aggregations with millions of rows
+- Reports requiring custom optimizations
+
+### Optimization Phases
 
 ```typescript
-// common/decorators/cacheable.decorator.ts
-import { SetMetadata } from '@nestjs/common';
-
-export const CACHE_KEY_METADATA = 'cache:key';
-export const CACHE_TTL_METADATA = 'cache:ttl';
-
-export function Cacheable(key: string, ttl: number = 3600) {
-  return (target: any, propertyKey: string, descriptor: PropertyDescriptor) => {
-    SetMetadata(CACHE_KEY_METADATA, key)(target, propertyKey, descriptor);
-    SetMetadata(CACHE_TTL_METADATA, ttl)(target, propertyKey, descriptor);
-  };
-}
-
-// common/interceptors/cache.interceptor.ts
-import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
-import { Observable, of } from 'rxjs';
-import { tap } from 'rxjs/operators';
-import { Reflector } from '@nestjs/core';
-import Redis from 'ioredis';
-
+// Phase 1: Simple implementation (start here)
 @Injectable()
-export class CacheInterceptor implements NestInterceptor {
-  constructor(
-    private reflector: Reflector,
-    private redis: Redis,
-  ) {}
-
-  async intercept(
-    context: ExecutionContext,
-    next: CallHandler,
-  ): Promise<Observable<any>> {
-    const cacheKey = this.reflector.get<string>(
-      CACHE_KEY_METADATA,
-      context.getHandler(),
-    );
-
-    if (!cacheKey) {
-      return next.handle();
-    }
-
-    const ttl = this.reflector.get<number>(
-      CACHE_TTL_METADATA,
-      context.getHandler(),
-    );
-
-    const request = context.switchToHttp().getRequest();
-    const key = this.buildKey(cacheKey, request);
-
-    // Check cache
-    const cached = await this.redis.get(key);
-    if (cached) {
-      return of(JSON.parse(cached));
-    }
-
-    // Execute and cache
-    return next.handle().pipe(
-      tap(async (data) => {
-        await this.redis.setex(key, ttl, JSON.stringify(data));
-      }),
-    );
-  }
-
-  private buildKey(template: string, request: any): string {
-    return template.replace(/:(\w+)/g, (_, param) => request.params[param]);
+export class UserService {
+  async getUser(id: string): Promise<User> {
+    return this.userRepository.findById(id);
   }
 }
 
-// Usage
+// Phase 2: Add caching ONLY if performance metrics show need
 @Injectable()
-export class ProductService {
-  @Cacheable('product:id', 3600) // Cache for 1 hour
-  async findById(id: string): Promise<Product> {
-    return this.productRepository.findById(id);
+export class UserService {
+  @Cacheable('user:id', 3600)
+  async getUser(id: string): Promise<User> {
+    return this.userRepository.findById(id);
+  }
+}
+
+// Phase 3: Add DataLoader ONLY if N+1 detected in production
+@Injectable({ scope: Scope.REQUEST })
+export class UserService {
+  constructor(private userLoader: UserLoader) {}
+
+  async getUsers(ids: string[]): Promise<User[]> {
+    return this.userLoader.loadMany(ids);
   }
 }
 ```
 
-#### Cache Invalidation Pattern
-
-```typescript
-// common/services/cache.service.ts
-@Injectable()
-export class CacheService {
-  constructor(@Inject('REDIS_CLIENT') private redis: Redis) {}
-
-  async invalidatePattern(pattern: string): Promise<void> {
-    const keys = await this.redis.keys(pattern);
-    if (keys.length > 0) {
-      await this.redis.del(...keys);
-    }
-  }
-
-  async invalidateTags(tags: string[]): Promise<void> {
-    const pipeline = this.redis.pipeline();
-    
-    for (const tag of tags) {
-      const keys = await this.redis.smembers(`tag:${tag}`);
-      if (keys.length > 0) {
-        pipeline.del(...keys);
-      }
-      pipeline.del(`tag:${tag}`);
-    }
-
-    await pipeline.exec();
-  }
-
-  async setWithTags(
-    key: string,
-    value: any,
-    ttl: number,
-    tags: string[],
-  ): Promise<void> {
-    const pipeline = this.redis.pipeline();
-    
-    pipeline.setex(key, ttl, JSON.stringify(value));
-    
-    for (const tag of tags) {
-      pipeline.sadd(`tag:${tag}`, key);
-      pipeline.expire(`tag:${tag}`, ttl);
-    }
-
-    await pipeline.exec();
-  }
-}
-
-// Usage
-async updateProduct(id: string, data: UpdateProductDto): Promise<Product> {
-  const product = await this.productRepository.update(id, data);
-  
-  // Invalidate all caches related to this product
-  await this.cacheService.invalidateTags([
-    `product:${id}`,
-    `category:${product.categoryId}`,
-    'products:list',
-  ]);
-
-  return product;
-}
-```
-
----
-
-### 9. Background Jobs & Task Scheduling
-
-#### Bull Queue for Async Processing
-
-```typescript
-// modules/email/email.processor.ts
-import { Processor, Process } from '@nestjs/bull';
-import { Job } from 'bull';
-import { Logger } from '@nestjs/common';
-
-interface SendEmailJob {
-  to: string;
-  subject: string;
-  template: string;
-  context: Record<string, any>;
-}
-
-@Processor('email')
-export class EmailProcessor {
-  private readonly logger = new Logger(EmailProcessor.name);
-
-  constructor(private emailService: EmailService) {}
-
-  @Process('send-welcome')
-  async sendWelcomeEmail(job: Job<SendEmailJob>): Promise<void> {
-    this.logger.log(`Processing welcome email for ${job.data.to}`);
-    
-    try {
-      await this.emailService.send({
-        to: job.data.to,
-        subject: job.data.subject,
-        template: job.data.template,
-        context: job.data.context,
-      });
-      
-      this.logger.log(`Email sent successfully to ${job.data.to}`);
-    } catch (error) {
-      this.logger.error(`Failed to send email to ${job.data.to}`, error);
-      throw error; // Will trigger retry
-    }
-  }
-
-  @Process('send-bulk')
-  async sendBulkEmails(job: Job<SendEmailJob[]>): Promise<void> {
-    const total = job.data.length;
-    let processed = 0;
-
-    for (const email of job.data) {
-      try {
-        await this.emailService.send(email);
-        processed++;
-        
-        // Update progress
-        await job.progress((processed / total) * 100);
-      } catch (error) {
-        this.logger.error(`Failed to send email to ${email.to}`, error);
-      }
-    }
-
-    this.logger.log(`Bulk email job completed: ${processed}/${total} sent`);
-  }
-}
-
-// Queue configuration
-@Module({
-  imports: [
-    BullModule.registerQueue({
-      name: 'email',
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 1000,
-        },
-        removeOnComplete: true,
-        removeOnFail: false,
-      },
-    }),
-  ],
-  providers: [EmailProcessor, EmailService],
-})
-export class EmailModule {}
-```
-
-#### Scheduled Tasks (Cron Jobs)
-
-```typescript
-// modules/tasks/tasks.service.ts
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression, Interval, Timeout } from '@nestjs/schedule';
-
-@Injectable()
-export class TasksService {
-  private readonly logger = new Logger(TasksService.name);
-
-  // Run every day at midnight
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-  async handleDailyCleanup(): Promise<void> {
-    this.logger.log('Running daily cleanup task');
-    
-    await this.prisma.session.deleteMany({
-      where: {
-        expiresAt: {
-          lt: new Date(),
-        },
-      },
-    });
-
-    this.logger.log('Daily cleanup completed');
-  }
-
-  // Run every 5 minutes
-  @Cron('*/5 * * * *')
-  async syncPendingOrders(): Promise<void> {
-    const pendingOrders = await this.orderRepository.findPending();
-    
-    for (const order of pendingOrders) {
-      await this.orderQueue.add('process', { orderId: order.id });
-    }
-  }
-
-  // Run every 10 seconds
-  @Interval(10000)
-  async checkSystemHealth(): Promise<void> {
-    const health = await this.healthService.check();
-    
-    if (!health.isHealthy) {
-      this.logger.warn('System health check failed', health.details);
-    }
-  }
-
-  // Run once after 5 seconds on startup
-  @Timeout(5000)
-  async initializeCache(): Promise<void> {
-    this.logger.log('Initializing cache...');
-    await this.cacheService.warmUp();
-  }
-}
-```
-
----
-
-### 10. API Documentation (OpenAPI/Swagger)
-
-#### Automatic Documentation with Decorators
-
-```typescript
-// modules/users/presentation/users.controller.ts
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-
-@ApiTags('Users')
-@ApiBearerAuth()
-@Controller('users')
-export class UsersController {
-  constructor(private usersService: UsersService) {}
-
-  @Get()
-  @ApiOperation({ summary: 'Get all users' })
-  @ApiResponse({
-    status: 200,
-    description: 'List of users',
-    type: [UserResponseDto],
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Unauthorized',
-  })
-  async findAll(@Query() query: PaginationDto): Promise<UserResponseDto[]> {
-    return this.usersService.findAll(query);
-  }
-
-  @Post()
-  @ApiOperation({ summary: 'Create a new user' })
-  @ApiResponse({
-    status: 201,
-    description: 'User created successfully',
-    type: UserResponseDto,
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid input',
-  })
-  async create(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
-    return this.usersService.create(dto);
-  }
-}
-
-// DTO with Swagger annotations
-export class CreateUserDto {
-  @ApiProperty({
-    description: 'User email address',
-    example: 'user@example.com',
-  })
-  @IsEmail()
-  readonly email: string;
-
-  @ApiProperty({
-    description: 'User full name',
-    example: 'John Doe',
-    minLength: 2,
-    maxLength: 50,
-  })
-  @IsString()
-  @MinLength(2)
-  @MaxLength(50)
-  readonly name: string;
-
-  @ApiPropertyOptional({
-    description: 'User role',
-    enum: UserRole,
-    default: UserRole.USER,
-  })
-  @IsEnum(UserRole)
-  @IsOptional()
-  readonly role?: UserRole;
-}
-```
-
----
-
-### 11. Testing (Comprehensive Coverage)
-
-#### Unit Tests for Services
-
-```typescript
-// modules/users/application/users.service.spec.ts
-import { Test, TestingModule } from '@nestjs/testing';
-import { UsersService } from './users.service';
-import { UserRepository } from '../infrastructure/user.repository';
-
-describe('UsersService', () => {
-  let service: UsersService;
-  let repository: jest.Mocked<UserRepository>;
-
-  beforeEach(async () => {
-    const mockRepository = {
-      findById: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        UsersService,
-        {
-          provide: UserRepository,
-          useValue: mockRepository,
-        },
-      ],
-    }).compile();
-
-    service = module.get<UsersService>(UsersService);
-    repository = module.get(UserRepository);
-  });
-
-  describe('findById', () => {
-    it('should return user when found', async () => {
-      const mockUser = {
-        id: '1',
-        email: 'test@test.com',
-        name: 'Test User',
-      };
-
-      repository.findById.mockResolvedValue(mockUser);
-
-      const result = await service.findById('1');
-
-      expect(result).toEqual(mockUser);
-      expect(repository.findById).toHaveBeenCalledWith('1');
-    });
-
-    it('should throw NotFoundException when user not found', async () => {
-      repository.findById.mockResolvedValue(null);
-
-      await expect(service.findById('999')).rejects.toThrow(
-        UserNotFoundException,
-      );
-    });
-  });
-
-  describe('create', () => {
-    it('should create user with hashed password', async () => {
-      const dto = {
-        email: 'new@test.com',
-        name: 'New User',
-        password: 'password123',
-      };
-
-      const mockCreatedUser = {
-        id: '2',
-        email: dto.email,
-        name: dto.name,
-      };
-
-      repository.create.mockResolvedValue(mockCreatedUser);
-
-      const result = await service.create(dto);
-
-      expect(result).toEqual(mockCreatedUser);
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          email: dto.email,
-          name: dto.name,
-          password: expect.not.stringContaining('password123'), // Should be hashed
-        }),
-      );
-    });
-  });
-});
-```
-
-#### E2E Tests
-
-```typescript
-// test/users.e2e-spec.ts
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import * as request from 'supertest';
-import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/database/prisma.service';
-
-describe('UsersController (e2e)', () => {
-  let app: INestApplication;
-  let prisma: PrismaService;
-  let authToken: string;
-
-  beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-    
-    await app.init();
-
-    prisma = app.get(PrismaService);
-
-    // Clean database
-    await prisma.user.deleteMany();
-
-    // Create test user and get auth token
-    const response = await request(app.getHttpServer())
-      .post('/auth/register')
-      .send({
-        email: 'test@test.com',
-        name: 'Test User',
-        password: 'password123',
-      });
-
-    authToken = response.body.accessToken;
-  });
-
-  afterAll(async () => {
-    await prisma.$disconnect();
-    await app.close();
-  });
-
-  describe('GET /users', () => {
-    it('should return 401 without auth token', () => {
-      return request(app.getHttpServer())
-        .get('/users')
-        .expect(401);
-    });
-
-    it('should return users list with valid token', () => {
-      return request(app.getHttpServer())
-        .get('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .expect(200)
-        .expect((res) => {
-          expect(Array.isArray(res.body)).toBe(true);
-          expect(res.body.length).toBeGreaterThan(0);
-        });
-    });
-  });
-
-  describe('POST /users', () => {
-    it('should create new user', () => {
-      return request(app.getHttpServer())
-        .post('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          email: 'new@test.com',
-          name: 'New User',
-          password: 'password123',
-        })
-        .expect(201)
-        .expect((res) => {
-          expect(res.body).toHaveProperty('id');
-          expect(res.body.email).toBe('new@test.com');
-          expect(res.body).not.toHaveProperty('password');
-        });
-    });
-
-    it('should return 400 for invalid email', () => {
-      return request(app.getHttpServer())
-        .post('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          email: 'invalid-email',
-          name: 'Test',
-          password: 'password123',
-        })
-        .expect(400)
-        .expect((res) => {
-          expect(res.body.message).toContain('email');
-        });
-    });
-  });
-});
-```
-
----
-
-### 12. Performance Optimization
-
-#### Database Query Optimization
+### Database Query Optimization
 
 ```typescript
 // Bad - Loading entire objects when only IDs needed
@@ -1414,714 +906,235 @@ async getUserFavoriteProductIds(userId: string): Promise<string[]> {
   
   return user.favoriteProducts.map(p => p.id);
 }
-
-// Better - Use raw query for complex aggregations
-async getTopSellingProducts(limit: number): Promise<ProductStats[]> {
-  return this.prisma.$queryRaw`
-    SELECT 
-      p.id,
-      p.name,
-      COUNT(oi.id) as total_sold,
-      SUM(oi.quantity * oi.price) as revenue
-    FROM products p
-    JOIN order_items oi ON oi.product_id = p.id
-    GROUP BY p.id
-    ORDER BY total_sold DESC
-    LIMIT ${limit}
-  `;
-}
-```
-
-#### Request Batching with DataLoader
-
-```typescript
-// common/loaders/user.loader.ts
-import DataLoader from 'dataloader';
-import { Injectable, Scope } from '@nestjs/common';
-
-@Injectable({ scope: Scope.REQUEST })
-export class UserLoader {
-  constructor(private userRepository: UserRepository) {}
-
-  private batchUsers = new DataLoader<string, User>(
-    async (ids: string[]) => {
-      const users = await this.userRepository.findManyByIds(ids);
-      
-      // Map users to match the order of requested IDs
-      const userMap = new Map(users.map(user => [user.id, user]));
-      return ids.map(id => userMap.get(id) || null);
-    },
-  );
-
-  async load(id: string): Promise<User> {
-    return this.batchUsers.load(id);
-  }
-
-  async loadMany(ids: string[]): Promise<User[]> {
-    return this.batchUsers.loadMany(ids);
-  }
-}
-
-// Usage - Prevents N+1 queries
-async getOrdersWithUsers(orderIds: string[]): Promise<OrderWithUser[]> {
-  const orders = await this.orderRepository.findManyByIds(orderIds);
-  
-  // Single batched query instead of N queries
-  const users = await this.userLoader.loadMany(
-    orders.map(order => order.userId),
-  );
-
-  return orders.map((order, index) => ({
-    ...order,
-    user: users[index],
-  }));
-}
-```
-
-#### Response Compression
-
-```typescript
-// main.ts
-import * as compression from 'compression';
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  
-  app.use(
-    compression({
-      filter: (req, res) => {
-        if (req.headers['x-no-compression']) {
-          return false;
-        }
-        return compression.filter(req, res);
-      },
-      threshold: 1024, // Only compress responses > 1KB
-    }),
-  );
-
-  await app.listen(3000);
-}
 ```
 
 ---
 
-### 13. Security Best Practices
+## 12. Testing Standards
 
-#### Rate Limiting
+### Testing Priorities
+
+**Must test (blocker for merge):**
+- [ ] Services with business logic (unit tests)
+- [ ] Critical user flows (E2E tests)
+- [ ] Authentication/authorization (E2E tests)
+- [ ] Error scenarios (unit tests)
+
+**Should test (nice to have):**
+- [ ] Repositories (integration tests)
+- [ ] Custom validators
+- [ ] Guards and interceptors
+
+**Don't test:**
+- Simple DTOs with only decorators
+- NestJS framework code
+- Third-party libraries
+
+### Unit Tests for Services
 
 ```typescript
-// common/guards/throttle.guard.ts
-import { ThrottlerGuard } from '@nestjs/throttler';
-import { Injectable } from '@nestjs/common';
+describe('UsersService', () => {
+  let service: UsersService;
+  let repository: jest.Mocked<UserRepository>;
 
-@Injectable()
-export class CustomThrottlerGuard extends ThrottlerGuard {
-  protected async getTracker(req: Record<string, any>): Promise<string> {
-    // Use user ID if authenticated, otherwise IP
-    return req.user?.id || req.ip;
-  }
-}
+  beforeEach(async () => {
+    const mockRepository = {
+      findById: jest.fn(),
+      create: jest.fn(),
+    };
 
-// Module configuration
-@Module({
-  imports: [
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000, // 1 minute
-        limit: 10,  // 10 requests per minute
-      },
-    ]),
-  ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: CustomThrottlerGuard,
-    },
-  ],
-})
-export class AppModule {}
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        {
+          provide: UserRepository,
+          useValue: mockRepository,
+        },
+      ],
+    }).compile();
 
-// Override per route
-@Controller('auth')
-export class AuthController {
-  @Post('login')
-  @Throttle({ default: { limit: 3, ttl: 60000 } }) // 3 attempts per minute
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
-  }
-}
+    service = module.get<UsersService>(UsersService);
+    repository = module.get(UserRepository);
+  });
+
+  // ✅ Must test
+  it('should return user when found', async () => {
+    const mockUser = { id: '1', email: 'test@test.com' };
+    repository.findById.mockResolvedValue(mockUser);
+
+    const result = await service.findById('1');
+
+    expect(result).toEqual(mockUser);
+  });
+
+  // ✅ Must test
+  it('should throw NotFoundException when user not found', async () => {
+    repository.findById.mockResolvedValue(null);
+
+    await expect(service.findById('999')).rejects.toThrow(
+      UserNotFoundException,
+    );
+  });
+});
 ```
 
-#### Input Sanitization
+### E2E Tests
 
 ```typescript
-// common/pipes/sanitize.pipe.ts
-import { PipeTransform, Injectable, ArgumentMetadata } from '@nestjs/common';
-import * as sanitizeHtml from 'sanitize-html';
+describe('UsersController (e2e)', () => {
+  let app: INestApplication;
+  let authToken: string;
 
-@Injectable()
-export class SanitizePipe implements PipeTransform {
-  transform(value: any, metadata: ArgumentMetadata) {
-    if (typeof value === 'string') {
-      return sanitizeHtml(value, {
-        allowedTags: [],
-        allowedAttributes: {},
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+    
+    await app.init();
+
+    // Get auth token
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'test@test.com', password: 'password123' });
+
+    authToken = response.body.accessToken;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  // ✅ Must test critical flows
+  it('should create new user', () => {
+    return request(app.getHttpServer())
+      .post('/users')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        email: 'new@test.com',
+        name: 'New User',
+        password: 'password123',
+      })
+      .expect(201)
+      .expect((res) => {
+        expect(res.body).toHaveProperty('id');
+        expect(res.body).not.toHaveProperty('password');
       });
-    }
+  });
 
-    if (typeof value === 'object' && value !== null) {
-      return this.sanitizeObject(value);
-    }
-
-    return value;
-  }
-
-  private sanitizeObject(obj: any): any {
-    const sanitized: any = {};
-    
-    for (const [key, value] of Object.entries(obj)) {
-      if (typeof value === 'string') {
-        sanitized[key] = sanitizeHtml(value, {
-          allowedTags: [],
-          allowedAttributes: {},
-        });
-      } else if (typeof value === 'object' && value !== null) {
-        sanitized[key] = this.sanitizeObject(value);
-      } else {
-        sanitized[key] = value;
-      }
-    }
-
-    return sanitized;
-  }
-}
-
-// Usage
-@Post()
-async create(@Body(SanitizePipe) dto: CreatePostDto) {
-  return this.postsService.create(dto);
-}
-```
-
-#### CORS Configuration
-
-```typescript
-// main.ts
-app.enableCors({
-  origin: (origin, callback) => {
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-    
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 3600,
+  // ✅ Must test validation
+  it('should return 400 for invalid email', () => {
+    return request(app.getHttpServer())
+      .post('/users')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        email: 'invalid-email',
+        name: 'Test',
+        password: 'password123',
+      })
+      .expect(400);
+  });
 });
 ```
 
 ---
 
-### 14. Logging & Monitoring
+## 13. Anti-Patterns (FORBIDDEN)
 
-#### Structured Logging with Winston
+### Layering Violations
 
+❌ **WRONG - Controller knows about Prisma:**
 ```typescript
-// common/logger/winston.logger.ts
-import { WinstonModule } from 'nest-winston';
-import * as winston from 'winston';
-
-export const createLogger = () =>
-  WinstonModule.createLogger({
-    transports: [
-      new winston.transports.Console({
-        format: winston.format.combine(
-          winston.format.timestamp(),
-          winston.format.ms(),
-          winston.format.colorize(),
-          winston.format.printf(({ timestamp, level, message, context, ...meta }) => {
-            return `${timestamp} [${context}] ${level}: ${message} ${
-              Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''
-            }`;
-          }),
-        ),
-      }),
-      new winston.transports.File({
-        filename: 'logs/error.log',
-        level: 'error',
-        format: winston.format.combine(
-          winston.format.timestamp(),
-          winston.format.json(),
-        ),
-      }),
-      new winston.transports.File({
-        filename: 'logs/combined.log',
-        format: winston.format.combine(
-          winston.format.timestamp(),
-          winston.format.json(),
-        ),
-      }),
-    ],
-  });
-
-// main.ts
-const app = await NestFactory.create(AppModule, {
-  logger: createLogger(),
-});
-```
-
-#### Request Logging Interceptor
-
-```typescript
-// common/interceptors/logging.interceptor.ts
-import {
-  Injectable,
-  NestInterceptor,
-  ExecutionContext,
-  CallHandler,
-  Logger,
-} from '@nestjs/common';
-import { Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
-
-@Injectable()
-export class LoggingInterceptor implements NestInterceptor {
-  private readonly logger = new Logger(LoggingInterceptor.name);
-
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const request = context.switchToHttp().getRequest();
-    const { method, url, body, ip } = request;
-    const userAgent = request.get('user-agent') || '';
-    const startTime = Date.now();
-
-    this.logger.log({
-      message: 'Incoming request',
-      method,
-      url,
-      body,
-      ip,
-      userAgent,
-    });
-
-    return next.handle().pipe(
-      tap({
-        next: (data) => {
-          const responseTime = Date.now() - startTime;
-          const response = context.switchToHttp().getResponse();
-          
-          this.logger.log({
-            message: 'Request completed',
-            method,
-            url,
-            statusCode: response.statusCode,
-            responseTime: `${responseTime}ms`,
-          });
-        },
-        error: (error) => {
-          const responseTime = Date.now() - startTime;
-          
-          this.logger.error({
-            message: 'Request failed',
-            method,
-            url,
-            error: error.message,
-            stack: error.stack,
-            responseTime: `${responseTime}ms`,
-          });
-        },
-      }),
-    );
+@Controller('users')
+export class UsersController {
+  constructor(private prisma: PrismaService) {} // ❌ Infrastructure leak
+  
+  @Get(':id')
+  async getUser(@Param('id') id: string) {
+    return this.prisma.user.findUnique({ where: { id } }); // ❌ Direct DB
   }
 }
 ```
 
----
-
-### 15. Configuration Management
-
-#### Environment Variables with Validation
-
+✅ **CORRECT - Proper layering:**
 ```typescript
-// config/env.validation.ts
-import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsNumber, IsString, validateSync } from 'class-validator';
-
-enum Environment {
-  Development = 'development',
-  Production = 'production',
-  Test = 'test',
-}
-
-class EnvironmentVariables {
-  @IsEnum(Environment)
-  NODE_ENV: Environment;
-
-  @IsNumber()
-  PORT: number;
-
-  @IsString()
-  DATABASE_URL: string;
-
-  @IsString()
-  JWT_SECRET: string;
-
-  @IsNumber()
-  JWT_EXPIRATION: number;
-
-  @IsString()
-  REDIS_HOST: string;
-
-  @IsNumber()
-  REDIS_PORT: number;
-}
-
-export function validate(config: Record<string, unknown>) {
-  const validatedConfig = plainToInstance(EnvironmentVariables, config, {
-    enableImplicitConversion: true,
-  });
-
-  const errors = validateSync(validatedConfig, {
-    skipMissingProperties: false,
-  });
-
-  if (errors.length > 0) {
-    throw new Error(errors.toString());
+@Controller('users')
+export class UsersController {
+  constructor(private usersService: UsersService) {} // ✅ Service layer
+  
+  @Get(':id')
+  async getUser(@Param('id') id: string) {
+    return this.usersService.findById(id);
   }
-
-  return validatedConfig;
-}
-
-// app.module.ts
-@Module({
-  imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      validate,
-      envFilePath: `.env.${process.env.NODE_ENV}`,
-    }),
-  ],
-})
-export class AppModule {}
-```
-
-#### Type-Safe Configuration Service
-
-```typescript
-// config/config.service.ts
-import { Injectable } from '@nestjs/common';
-import { ConfigService as NestConfigService } from '@nestjs/config';
-
-@Injectable()
-export class AppConfigService {
-  constructor(private configService: NestConfigService) {}
-
-  get port(): number {
-    return this.configService.get<number>('PORT', 3000);
-  }
-
-  get database() {
-    return {
-      url: this.configService.get<string>('DATABASE_URL'),
-      poolSize: this.configService.get<number>('DB_POOL_SIZE', 10),
-    };
-  }
-
-  get jwt() {
-    return {
-      secret: this.configService.get<string>('JWT_SECRET'),
-      expiresIn: this.configService.get<number>('JWT_EXPIRATION', 3600),
-    };
-  }
-
-  get redis() {
-    return {
-      host: this.configService.get<string>('REDIS_HOST', 'localhost'),
-      port: this.configService.get<number>('REDIS_PORT', 6379),
-      ttl: this.configService.get<number>('REDIS_TTL', 3600),
-    };
-  }
-
-  get isProduction(): boolean {
-    return this.configService.get('NODE_ENV') === 'production';
-  }
-}
-```
-
----
-
-## Anti-Patterns (Strictly Forbidden)
-
-- **Business Logic in Controllers:** Controllers should ONLY handle HTTP concerns (request/response). Move all logic to services.
-- **Direct Database Access in Controllers:** Never inject Prisma/TypeORM directly into controllers. Use repositories.
-- **Circular Dependencies:** Avoid modules importing each other. Use forwardRef() only as last resort.
-- **Synchronous Operations in Request Handlers:** Never block the event loop with CPU-intensive tasks. Use Bull queues.
-- **Missing Error Handling:** Every async operation must have try-catch or proper error filter.
-- **Hardcoded Values:** Never hardcode URLs, credentials, or configuration. Use ConfigService.
-- **Global State/Singletons:** Avoid global variables. Use DI system.
-- **Mixing Concerns:** Presentation (Controllers) should not know about Infrastructure (Prisma). Use abstraction layers.
-- **Unvalidated Input:** Every DTO must have validation decorators.
-- **Missing Tests:** No PR should be merged without unit tests for services and E2E tests for critical flows.
-
----
-
-## Code Generation Flow
-
-When asked to build a feature, follow this structure:
-
-1. **Domain Layer:** Define entities, value objects, and domain exceptions.
-2. **Application Layer:** Create DTOs, use cases (services), and command/query handlers.
-3. **Infrastructure Layer:** Implement repositories with Prisma, external service clients.
-4. **Presentation Layer:** Build controllers with proper validation, guards, and interceptors.
-5. **Testing:** Write unit tests for services and E2E tests for endpoints.
-
----
-
-## Example: Complete Feature Implementation
-
-### Domain Layer
-
-```typescript
-// modules/orders/domain/order.entity.ts
-export enum OrderStatus {
-  PENDING = 'PENDING',
-  CONFIRMED = 'CONFIRMED',
-  SHIPPED = 'SHIPPED',
-  DELIVERED = 'DELIVERED',
-  CANCELLED = 'CANCELLED',
-}
-
-export class Order {
-  constructor(
-    public readonly id: string,
-    public readonly userId: string,
-    public readonly items: OrderItem[],
-    public status: OrderStatus,
-    public readonly createdAt: Date,
-    public updatedAt: Date,
-  ) {}
-
-  get total(): number {
-    return this.items.reduce((sum, item) => sum + item.subtotal, 0);
-  }
-
-  canBeCancelled(): boolean {
-    return [OrderStatus.PENDING, OrderStatus.CONFIRMED].includes(this.status);
-  }
-
-  cancel(): void {
-    if (!this.canBeCancelled()) {
-      throw new OrderCannotBeCancelledException(this.id, this.status);
-    }
-    this.status = OrderStatus.CANCELLED;
-    this.updatedAt = new Date();
-  }
-}
-
-export class OrderItem {
-  constructor(
-    public readonly productId: string,
-    public readonly quantity: number,
-    public readonly price: number,
-  ) {}
-
-  get subtotal(): number {
-    return this.quantity * this.price;
-  }
-}
-
-// modules/orders/domain/exceptions/order.exception.ts
-export class OrderNotFoundException extends DomainException {
-  constructor(orderId: string) {
-    super(`Order ${orderId} not found`, 'ORDER_NOT_FOUND');
-  }
-}
-
-export class OrderCannotBeCancelledException extends DomainException {
-  constructor(orderId: string, status: OrderStatus) {
-    super(
-      `Order ${orderId} cannot be cancelled in ${status} status`,
-      'ORDER_CANNOT_BE_CANCELLED',
-    );
-  }
-}
-```
-
-### Application Layer
-
-```typescript
-// modules/orders/application/dtos/create-order.dto.ts
-export class CreateOrderDto {
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => OrderItemDto)
-  readonly items: OrderItemDto[];
-}
-
-class OrderItemDto {
-  @IsString()
-  readonly productId: string;
-
-  @IsNumber()
-  @Min(1)
-  readonly quantity: number;
-}
-
-// modules/orders/application/orders.service.ts
-@Injectable()
-export class OrdersService {
-  constructor(
-    private orderRepository: IOrderRepository,
-    private productRepository: IProductRepository,
-    private emailQueue: Queue,
-  ) {}
-
-  async create(userId: string, dto: CreateOrderDto): Promise<Order> {
-    // Validate products exist and have sufficient stock
-    const products = await this.productRepository.findManyByIds(
-      dto.items.map(item => item.productId),
-    );
-
-    if (products.length !== dto.items.length) {
-      throw new ProductNotFoundException();
-    }
-
-    // Create order
-    const order = await this.orderRepository.create({
-      userId,
-      items: dto.items.map(item => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        price: products.find(p => p.id === item.productId).price,
-      })),
-      status: OrderStatus.PENDING,
-    });
-
-    // Send confirmation email asynchronously
-    await this.emailQueue.add('order-confirmation', {
-      orderId: order.id,
-      userId: order.userId,
-    });
-
-    return order;
-  }
-
-  async cancel(orderId: string, userId: string): Promise<Order> {
-    const order = await this.orderRepository.findById(orderId);
-
-    if (!order) {
-      throw new OrderNotFoundException(orderId);
-    }
-
-    if (order.userId !== userId) {
-      throw new UnauthorizedException('Not your order');
-    }
-
-    order.cancel(); // Domain logic
-
-    return this.orderRepository.update(order);
-  }
-}
-```
-
-### Infrastructure Layer
-
-```typescript
-// modules/orders/infrastructure/order.repository.ts
-export interface IOrderRepository {
-  findById(id: string): Promise<Order | null>;
-  create(data: CreateOrderData): Promise<Order>;
-  update(order: Order): Promise<Order>;
 }
 
 @Injectable()
-export class OrderRepository implements IOrderRepository {
-  constructor(private prisma: PrismaService) {}
-
-  async findById(id: string): Promise<Order | null> {
-    const data = await this.prisma.order.findUnique({
-      where: { id },
-      include: { items: true },
-    });
-
-    return data ? this.toDomain(data) : null;
-  }
-
-  async create(data: CreateOrderData): Promise<Order> {
-    const created = await this.prisma.order.create({
-      data: {
-        userId: data.userId,
-        status: data.status,
-        items: {
-          create: data.items,
-        },
-      },
-      include: { items: true },
-    });
-
-    return this.toDomain(created);
-  }
-
-  async update(order: Order): Promise<Order> {
-    const updated = await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: order.status,
-        updatedAt: order.updatedAt,
-      },
-      include: { items: true },
-    });
-
-    return this.toDomain(updated);
-  }
-
-  private toDomain(data: any): Order {
-    return new Order(
-      data.id,
-      data.userId,
-      data.items.map(
-        item => new OrderItem(item.productId, item.quantity, item.price),
-      ),
-      data.status as OrderStatus,
-      data.createdAt,
-      data.updatedAt,
-    );
+export class UsersService {
+  constructor(private userRepository: IUserRepository) {} // ✅ Interface
+  
+  async findById(id: string): Promise<UserDTO> {
+    const user = await this.userRepository.findById(id);
+    if (!user) throw new UserNotFoundException(id);
+    return this.toDTO(user);
   }
 }
 ```
 
-### Presentation Layer
+### Other Anti-Patterns
 
-```typescript
-// modules/orders/presentation/orders.controller.ts
-@ApiTags('Orders')
-@ApiBearerAuth()
-@Controller('orders')
-@UseGuards(JwtAuthGuard)
-export class OrdersController {
-  constructor(private ordersService: OrdersService) {}
+- ❌ **Business Logic in Controllers:** Controllers handle HTTP only, move logic to services
+- ❌ **Circular Dependencies:** Avoid modules importing each other
+- ❌ **Synchronous Operations in Handlers:** Never block event loop, use Bull queues
+- ❌ **Missing Error Handling:** Every async operation needs try-catch or filter
+- ❌ **Hardcoded Values:** Never hardcode URLs/credentials, use ConfigService
+- ❌ **Global State/Singletons:** Avoid global variables, use DI
+- ❌ **Unvalidated Input:** Every DTO must have validation decorators
 
-  @Post()
-  @ApiOperation({ summary: 'Create a new order' })
-  @ApiResponse({ status: 201, description: 'Order created successfully' })
-  async create(
-    @Request() req,
-    @Body() dto: CreateOrderDto,
-  ): Promise<Order> {
-    return this.ordersService.create(req.user.id, dto);
-  }
+**Rule of thumb:**
+- Controllers → Services (never Repositories/Prisma)
+- Services → Repositories (via interfaces for complex logic)
+- Repositories → Prisma/Database
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'Cancel an order' })
-  @ApiResponse({ status: 200, description: 'Order cancelled successfully' })
-  async cancel(
-    @Request() req,
-    @Param('id') id: string,
-  ): Promise<Order> {
-    return this.ordersService.cancel(id, req.user.id);
-  }
-}
-```
+---
+
+## 14. Agent Conduct (Meta Rules)
+
+**Do NOT:**
+- Apply formatting beyond standard Prettier/ESLint
+- Reorder class methods without reason
+- Enforce architectures beyond this doc
+
+**Communication:**
+- "consider" / "suggest" for optimizations
+- "must" / "never" only for correctness
+
+**When uncertain:** Exclude guidance.
+
+---
+
+### Contract-First Workflow (STRICT for Public APIs)
+
+When implementing a new public-facing feature:
+
+1. **ALWAYS present the interface definition FIRST**
+2. Say: "Here's the proposed service interface and domain exceptions. Should I proceed with implementation?"
+3. **WAIT** for human approval
+4. Only then implement concrete service/repository
+5. Show controller integration last
+
+**For internal endpoints:** Skip interface definition unless business logic is complex.
+
+**Never skip the interface review step for public APIs.**
+
+---
+
+## Philosophy
+
+- Contracts over concreteness (at boundaries)
+- Services over controllers (business logic placement)
+- Interfaces over implementations (when abstraction adds value)
+- Pragmatism over dogma
+
+**Strict where it matters. Flexible where it doesn't.**
