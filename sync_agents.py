@@ -4,15 +4,20 @@ import argparse
 from pathlib import Path
 import re
 
-TARGET_FILES = [
+SKILL_TARGETS = [
+    ".github/skills",
+    ".gemini/skills",
+    ".prompts/skills",
+    ".claude/skills"
+]
+
+INSTRUCTION_FILES = [
     "CLAUDE.md",
     "GEMINI.md",
     "AGENT.md",
     ".cursorrules",
     ".github/copilot-instructions.md"
 ]
-
-SKILLS_DEST_DIR = ".prompts/skills"
 
 def get_rule_content(tech_path):
     rule_path = tech_path / "core.md"
@@ -22,76 +27,73 @@ def get_rule_content(tech_path):
     with open(rule_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-def parse_skill_metadata(file_path):
-    description = "No description provided."
+def parse_metadata(file_path):
+    name = file_path.parent.name
+    description = f"Expert coding patterns for {name}."
+
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            for _ in range(10): 
-                line = f.readline()
-                if not line: break
-                match = re.search(r'(?i)^description:\s*(.+)', line)
-                if match:
-                    description = match.group(1).strip()
-                    break
-    except Exception:
-        pass
-    return description
+            content = f.read()
+            match = re.search(r'(?i)^description:\s*(.+)', content)
+            if match:
+                description = match.group(1).strip()
+    except Exception as e:
+        print(f"⚠️ Warning reading {file_path}: {e}")
+        content = ""
 
-def sync_skills(source_tech_path, target_project_path):
+    return name, description, content
+
+def create_skill_md_content(name, description, original_content):
+    cleaned_content = re.sub(r'(?i)^description:\s*.+\n', '', original_content, count=1)
+
+    return f"""---
+name: {name}
+description: {description}
+---
+
+{cleaned_content}
+"""
+
+def sync_skills_to_targets(source_tech_path, target_project_path):
     source_skills = source_tech_path / "skills"
-    target_skills = target_project_path / SKILLS_DEST_DIR
-    
-    skills_index = []
 
     if not source_skills.exists():
-        return []
+        print(f"⚠️ Source skills folder not found at: {source_skills}")
+        return 0
 
-    if target_skills.exists():
-        shutil.rmtree(target_skills)
-    
-    target_skills.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source_skills, target_skills)
+    count = 0
 
-    clean_target_base = SKILLS_DEST_DIR.replace("\\", "/")
-    
-    for root, dirs, files in os.walk(target_skills):
-        for file in files:
-            if file.endswith(".md") and not file.startswith('.'):
-                full_path = Path(root) / file
-                
-                rel_path = full_path.relative_to(target_project_path).as_posix()
-                
-                skill_name = full_path.parent.name if full_path.parent != target_skills else file.replace('.md', '')
-                
-                description = parse_skill_metadata(full_path)
-                
-                skills_index.append({
-                    "name": skill_name,
-                    "path": rel_path,
-                    "desc": description
-                })
-            
-    return skills_index
+    for target_rel_path in SKILL_TARGETS:
+        full_target_dir = target_project_path / target_rel_path
+        if full_target_dir.exists():
+            shutil.rmtree(full_target_dir)
+        full_target_dir.mkdir(parents=True, exist_ok=True)
 
-def generate_skills_footer(skills_index):
-    if not skills_index:
-        return ""
-    
-    footer = "\n\n---\n\n## 🧩 Capability Library (Skills)\n"
-    footer += "You have access to a library of specialized skills. \n"
-    footer += "When the user asks for a task that matches a skill's description, **you must READ the corresponding file** to get the instructions.\n\n"
-    
-    footer += "| Skill Name | Description | File Path |\n"
-    footer += "| :--- | :--- | :--- |\n"
-    
-    sorted_skills = sorted(skills_index, key=lambda x: x['name'])
-    
-    for skill in sorted_skills:
-        clean_desc = skill['desc'].replace("\n", " ").strip()
-        
-        footer += f"| **{skill['name']}** | {clean_desc} | `{skill['path']}` |\n"
-        
-    return footer
+    for item in source_skills.iterdir():
+        if item.is_dir():
+            src_file = item / "prompt.md"
+            if not src_file.exists(): src_file = item / "SKILL.md"
+            if not src_file.exists(): src_file = item / "skill.md"
+
+            if src_file.exists():
+                name, desc, raw_content = parse_metadata(src_file)
+                new_content = create_skill_md_content(name, desc, raw_content)
+
+                for target_rel_path in SKILL_TARGETS:
+                    target_dir = target_project_path / target_rel_path / name
+                    target_dir.mkdir(parents=True, exist_ok=True)
+
+                    dest_file = target_dir / "SKILL.md"
+
+                    with open(dest_file, 'w', encoding='utf-8') as f:
+                        f.write(new_content)
+
+                    if target_rel_path == ".github/skills":
+                         print(f"   🔨 Created: {target_rel_path}/{name}/SKILL.md")
+
+                count += 1
+
+    return count
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -103,23 +105,24 @@ if __name__ == "__main__":
     tech_path = base_path / f"{args.tech}_rules"
     target_path = Path(args.target).expanduser().resolve()
 
-    print(f"🚀 Syncing {args.tech} Skills -> {target_path.name}")
+    print(f"🚀 Starting Native Skills Deployment (SKILL.md)...")
 
-    content = get_rule_content(tech_path)
-    
-    if content:
-        skills_index = sync_skills(tech_path, target_path)
-        
-        final_content = content + generate_skills_footer(skills_index)
+    skill_count = sync_skills_to_targets(tech_path, target_path)
+    print(f"\n✨ Successfully deployed {skill_count} skills.")
 
-        for relative_dest in TARGET_FILES:
+    core_content = get_rule_content(tech_path)
+    if core_content:
+        footer = "\n\n---\n\n## ⚡️ Native Skills Active\n"
+        footer += "This workspace uses native skills structure (`.github/skills/SKILL.md`, etc).\n"
+
+        final_content = core_content + footer
+
+        for relative_dest in INSTRUCTION_FILES:
             dest_full_path = target_path / relative_dest
             try:
                 dest_full_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(dest_full_path, 'w', encoding='utf-8') as f:
                     f.write(final_content)
-                print(f"   ✅ Updated: {relative_dest}")
-            except Exception as e:
-                print(f"   ⚠️ Failed: {relative_dest} - {e}")
-        
-        print(f"\n✨ Success! Indexed {len(skills_index)} skills.")
+            except Exception:
+                pass
+        print("✅ Instruction files updated.")
