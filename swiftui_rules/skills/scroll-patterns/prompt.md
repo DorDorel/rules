@@ -1,3 +1,5 @@
+Description: Advanced scrolling techniques. CoordinateSpace usage, scroll detection, scroll-to-top logic, and ScrollViewReader interactions.
+
 # SwiftUI ScrollView Patterns Reference
 
 ## ScrollView Modifiers

@@ -84,7 +84,7 @@ The script will automatically propagate them to your projects and link them in t
 
 Add this to your `~/.zshrc` or `~/.bashrc` for quick access:
 ```
-    alias sync-ai='python3 /absolute/path/to/ai-rules-repo/sync_agents.py'
+    alias rules-sync='python3 /absolute/path/to/ai-rules-repo/sync_agents.py'
 ```
 
 **Usage:**

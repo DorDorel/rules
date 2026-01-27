@@ -1,3 +1,5 @@
+Description: Recipes for building complex Lists and ScrollViews. Implementing infinite scroll (pagination), pull-to-refresh, and handling empty states.
+
 # SwiftUI List Patterns Reference
 
 ## ForEach Identity and Stability

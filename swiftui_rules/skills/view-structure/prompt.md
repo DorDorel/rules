@@ -1,6 +1,10 @@
+Description: Blueprint for creating scalable SwiftUI Views. Covers Body structure, extraction of subviews, proper use of Modifiers order, and preventing Massive View Controller syndrome.
+
 # SwiftUI View Structure Reference
 
 ## View Structure Principles
+
+
 
 SwiftUI's diffing algorithm compares view hierarchies to determine what needs updating. Proper view composition directly impacts performance.
 

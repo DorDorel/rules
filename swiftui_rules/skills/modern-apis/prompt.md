@@ -1,3 +1,5 @@
+Description: Guide for using the latest iOS features (iOS 17/18+). Covers NavigationStack, SwiftData/CoreData integration, and modern concurrency (async/await).
+
 # Modern SwiftUI APIs Reference
 
 ## Overview

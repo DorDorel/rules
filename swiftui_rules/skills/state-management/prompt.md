@@ -1,3 +1,5 @@
+Description: Best practices for data flow. When to use @State, @Binding, @Observable, and Environment. Includes MVVM patterns and preventing memory leaks in closures.
+
 # SwiftUI State Management Reference
 
 ## Property Wrapper Selection Guide

@@ -1,3 +1,5 @@
+Description: Managing navigation flow. Correct usage of .sheet, .fullScreenCover, and NavigationPath. handling deep links and modal dismissals.
+
 # SwiftUI Sheet and Navigation Patterns Reference
 
 ## Sheet Patterns

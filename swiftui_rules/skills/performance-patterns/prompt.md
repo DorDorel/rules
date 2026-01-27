@@ -1,3 +1,5 @@
+Description: Optimization techniques to fix scroll hitching, frame drops, and hanging UI. Covers efficient list rendering, @MainActor usage, and minimizing view redraws.
+
 # SwiftUI Performance Patterns Reference
 
 ## Performance Optimization

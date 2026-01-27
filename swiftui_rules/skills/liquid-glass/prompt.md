@@ -1,3 +1,5 @@
+Description: Specific visual recipe for creating a 'Liquid Glass' or Frosted Glass effect using UltraThinMaterial and blurs. Use for premium UI styling.
+
 # SwiftUI Liquid Glass Reference (iOS 26+)
 
 ## Overview

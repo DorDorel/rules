@@ -1,3 +1,5 @@
+Description: Techniques for handling images efficiently. Caching strategies, resizing, using AsyncImage correctly, and managing memory usage with large assets.
+
 # SwiftUI Image Optimization Reference
 
 ## AsyncImage Best Practices

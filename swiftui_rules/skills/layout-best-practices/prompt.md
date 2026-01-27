@@ -1,3 +1,5 @@
+Description: Rules for responsive layouts. Using GeometryReader correctly, ZStack/VStack/HStack nesting strategies, and adapting UI for different device sizes.
+
 # SwiftUI Layout Best Practices Reference
 
 ## Relative Layout Over Constants

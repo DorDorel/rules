@@ -1,3 +1,5 @@
+Description: Typography and text handling. Dynamic Type support, localization strings, Markdown rendering in Text views, and complex string interpolation.
+
 # SwiftUI Text Formatting Reference
 
 ## Modern Text Formatting
